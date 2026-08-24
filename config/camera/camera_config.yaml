@@ -1,0 +1,105 @@
+# 相机参数配置
+cameras:
+  eye:
+    id: "192.168.2.10"
+    type: "berxel"
+    enabled: true
+    param_in_file: true
+    send_chassis_depth: false
+    expos_us: 1000
+    expos_gain: 100
+    pointcloud_type: 1  # 0: 无需点云, 1: 普通点云, 2: 彩色点云
+    qos: "best_effort"
+    width: 640  # 可选: "640x400" 或 "1280x800"
+    height: 400
+    
+  chest:
+    id: "192.168.2.11"
+    type: "berxel"
+    enabled: false
+    param_in_file: true
+    send_chassis_depth: false
+    expos_us: 1000
+    expos_gain: 100
+    pointcloud_type: 0  # 0: 无需点云, 1: 普通点云, 2: 彩色点云
+    qos: "best_effort"
+    width: 640  # 可选: "640x400" 或 "1280x800"
+    height: 400
+  
+  Aleft:
+    id: "192.168.2.12"
+    type: "berxel"
+    enabled: false
+    param_in_file: true
+    send_chassis_depth: false
+    expos_us: 1000
+    expos_gain: 100
+    pointcloud_type: 0  # 0: 无需点云, 1: 普通点云, 2: 彩色点云
+    qos: "best_effort"
+    width: 640  # 可选: "640x400" 或 "1280x800"
+    height: 400
+
+  Aright:
+    id: "192.168.2.13"
+    type: "berxel"
+    enabled: false
+    param_in_file: true
+    send_chassis_depth: false
+    expos_us: 1000
+    expos_gain: 100
+    pointcloud_type: 0  # 0: 无需点云, 1: 普通点云, 2: 彩色点云
+    qos: "best_effort"
+    width: 640  # 可选: "640x400" 或 "1280x800"
+    height: 400
+
+  Bfront:
+    id: "2.3.2"
+    type: "angstrong"
+    enabled: true
+    param_in_file: true
+    send_chassis_depth: true
+    expos_us: 1000
+    expos_gain: 100
+    pointcloud_type: 0  # 0: 无需点云, 1: 普通点云, 2: 彩色点云
+    qos: "best_effort"
+    width: 640
+    height: 480
+
+  Bback:
+    id: "2.3.1"
+    type: "angstrong"
+    enabled: false
+    param_in_file: true
+    send_chassis_depth: false
+    expos_us: 1000
+    expos_gain: 100
+    pointcloud_type: 0  # 0: 无需点云, 1: 普通点云, 2: 彩色点云
+    qos: "best_effort"
+    width: 640
+    height: 480
+
+  Bleft:
+    id: "2.3.5"
+    type: "angstrong"
+    enabled: false
+    param_in_file: true
+    send_chassis_depth: false
+    expos_us: 1000
+    expos_gain: 100
+    pointcloud_type: 0  # 0: 无需点云, 1: 普通点云, 2: 彩色点云
+    qos: "best_effort"
+    width: 640
+    height: 480
+
+  Bright:
+    id: "2.4.4"
+    type: "angstrong"
+    enabled: false
+    param_in_file: true
+    send_chassis_depth: false
+    expos_us: 1000
+    expos_gain: 100
+    pointcloud_type: 0  # 0: 无需点云, 1: 普通点云, 2: 彩色点云
+    qos: "best_effort"
+    width: 640
+    height: 480

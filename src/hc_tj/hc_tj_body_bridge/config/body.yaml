@@ -1,0 +1,24 @@
+# hc_tj 底盘 Redis 桥接配置
+# 腰部已并入 hc_tj_marvin_bridge_cpp，参数见 hc_tj/config/hardware.yaml 的 waist 段
+
+chassis_bridge:
+  ros__parameters:
+    redis_host: "192.168.0.3"
+    redis_port: 6379
+    redis_key_command: "taskGroupCmd"
+    redis_key_state: "agvState"
+    chassis_state_topic: "/io_teleop/chassis_state"
+    state_poll_interval_sec: 0.1
+    command_interval_sec: 0.08
+    command_timeout_sec: 0.25
+    max_vx: 0.1
+    max_vy: 0.1
+    max_vw: 0.2
+    linear_gain: 1.0
+    angular_gain: 1.0
+    lateral_gain: 1.0
+    vr_data_topic: "/io_teleop/vr_data"
+    stick_deadzone: 0.05
+    lateral_stick_invert: false
+    lateral_command_topic: "/io_teleop/target_base_lateral_move"
+    stop_repeat_count: 8

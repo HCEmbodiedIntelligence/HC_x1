@@ -1,0 +1,17 @@
+# Merge these entries under ros2.subscriber in TeleBox data_proxy.yaml.
+# video_0 is intentionally unchanged so the original head camera coexists.
+- data_type: sensor_msgs/msg/CompressedImage
+  encode_h264: true
+  name: video_0
+  topic: /io_teleop/camera_head/color
+  type: video
+- data_type: sensor_msgs/msg/CompressedImage
+  encode_h264: true
+  name: video_1
+  topic: /io_teleop/camera_d405_left/color/compressed
+  type: video
+- data_type: sensor_msgs/msg/CompressedImage
+  encode_h264: true
+  name: video_2
+  topic: /io_teleop/camera_d405_right/color/compressed
+  type: video

@@ -1,0 +1,57 @@
+# camera_driver 原始彩色话题 -> io_teleop CompressedImage (MJPEG/jpeg)
+# 相机启用列表由 HC_X1_CAMERA_CONFIG_DIR/camera_config.yaml 提供。
+
+camera_bridge_head:
+  ros__parameters:
+    input_topic: "/cameras/eye/color"
+    output_topic: "/io_teleop/camera_head/color"
+    jpeg_quality: 80
+    output_format: "jpeg"
+
+camera_bridge_head_depth:
+  ros__parameters:
+    input_topic: "/cameras/eye/depth"
+    output_topic: "/io_teleop/camera_head/depth"
+    png_compression: 3
+
+camera_bridge_head_calibration:
+  ros__parameters:
+    input_topic: "/cameras/eye/param"
+    output_topic: "/io_teleop/camera_head/calibration"
+    robot_extrinsics_topic: "/io_teleop/camera_head/extrinsics"
+    publish_rate_hz: 2.0
+    schema: "hc_camera_calibration/v1"
+    robot_extrinsics_schema: "hc_robot_camera_extrinsics/v1"
+    camera_name: "eye"
+    color_width: 640
+    color_height: 400
+    depth_width: 640
+    depth_height: 400
+    # camera_driver 定义：p_depth = R * p_rgb + t；平移单位为 mm。
+    translation_unit: "mm"
+    extrinsics_direction: "rgb_to_depth"
+
+    # 临时静态机器人-头部相机 TF。三条边共用 zhi_Link 作为父节点，TF 会自动
+    # 求出 R_arm_0_Link/L_arm_0_Link <-> camera_head；不要给 camera_head
+    # 同时设置两个父节点。
+    publish_robot_static_tf: true
+    robot_common_frame: "zhi_Link"
+    right_arm_base_frame: "R_arm_0_Link"
+    left_arm_base_frame: "L_arm_0_Link"
+    head_camera_frame: "camera_head"
+    depth_optical_frame: "eye_depth_optical"
+    rgb_optical_frame: "eye_rgb_optical"
+
+    # [x, y, z, roll, pitch, yaw]，平移单位 m，角度单位 rad。
+    # 左右臂安装关系直接取自 hc_tj_robot.urdf 的 R/L_arm0_fixed。
+    zhi_to_right_arm_base_xyz_rpy: [0.0, 0.0243, 0.32, 1.5708, 0.0, 0.0]
+    zhi_to_left_arm_base_xyz_rpy: [0.0, 0.1363, 0.32, -1.5708, 0.0, 0.0]
+
+    # 假设 head_1=head_2=0，将以下三段 URDF 链合并：
+    # zhi_Link -> head_1_Link -> head_2_Link -> camera_head。
+    # camera_head 原点位于 depth 光心，机械轴为 +Z 向前、+X 指向 RGB、+Y 向上。
+    zhi_to_head_camera_xyz_rpy: [0.11323, 0.100299, 0.62155, -2.0944, 0.0, -1.5708]
+
+    # ROS optical 轴为 +Z 向前、+X 向右、+Y 向下，因此相对机械轴绕 Z 旋转 pi。
+    # RGB optical 相对 depth optical 的 TF 由 /cameras/eye/param 标定值动态补入 /tf_static。
+    head_to_depth_optical_xyz_rpy: [0.0, 0.0, 0.0, 0.0, 0.0, 3.141592653589793]

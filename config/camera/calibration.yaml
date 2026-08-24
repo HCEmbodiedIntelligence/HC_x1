@@ -1,0 +1,201 @@
+RobotBody:
+  fixed_head: true
+  fold: true
+  calf_length: 0.380
+  thigh_length: 0.350
+BaseFront2Base:
+  translation:
+    x: 0.37
+    y: 0.02
+    z: 0.13
+  quaternion:
+    qw: 0.5
+    qx: -0.5
+    qy: 0.5
+    qz: -0.5
+  euler_degree:
+    yaw: -90.0036
+    pitch: 0.0023221
+    roll: -88.9595
+BaseFront2WaistLift:
+  translation:
+    x: 0.255939
+    y: 0.0141076
+    z: -0.286959
+  quaternion:
+    qw: 0.48304616178099624
+    qx: -0.5143631748814234
+    qy: 0.5187319749532426
+    qz: -0.4827153074801529
+  euler_degree:
+    yaw: -90.3984
+    pitch: 0.686557
+    roll: -88.6838
+Chest2WaistPitch:
+  translation:
+    x: 0.0987434
+    y: 0
+    z: 0.0765864
+  quaternion:
+    qw: 0.49427122149211555
+    qx: -0.5047950178351777
+    qy: 0.4980193853717913
+    qz: -0.5028465385854594
+  euler_degree:
+    yaw: -89.3975
+    pitch: 1.07811
+    roll: -88.6203
+BaseLeft2BaseFront:
+  translation:
+    x: -0.242
+    y: -0.210
+    z: -0.360
+  quaternion:
+    qw: 0
+    qx: 0
+    qy: 0
+    qz: 0
+  euler_degree:
+    yaw: 0
+    pitch: -90.0
+    roll: 0
+BaseRight2BaseFront:
+  translation:
+    x: 0.282
+    y: -0.210
+    z: -0.320
+  quaternion:
+    qw: 0
+    qx: 0
+    qy: 0
+    qz: 0
+  euler_degree:
+    yaw: 0
+    pitch: 90.0
+    roll: 0
+BaseBack2BaseFront:
+  translation:
+    x: 0.040
+    y: -0.170
+    z: -0.680
+  quaternion:
+    qw: 0
+    qx: 0
+    qy: 0
+    qz: 0
+  euler_degree:
+    yaw: 0
+    pitch: 180.0
+    roll: 0
+BaseBack2BaseLeft:
+  translation:
+    x: 0
+    y: 0
+    z: 0
+  quaternion:
+    qw: 0
+    qx: 0
+    qy: 0
+    qz: 0
+  euler_degree:
+    yaw: 0
+    pitch: 0
+    roll: 0
+BaseBack2BaseRight:
+  translation:
+    x: 0
+    y: 0
+    z: 0
+  quaternion:
+    qw: 0
+    qx: 0
+    qy: 0
+    qz: 0
+  euler_degree:
+    yaw: 0
+    pitch: 0
+    roll: 0
+Eye2Head:
+  translation:
+    x: 0.002495413017593595
+    y: -0.5457066437731777
+    z: 0.005213523199532721
+  quaternion:
+    qw: 0.96566271304124
+    qx: -0.2595934281815255
+    qy: -0.0038850424287090795
+    qz: 0.009575130919314539
+  euler_degree:
+    yaw: 1.1752086708230636
+    pitch: -0.14507301732755198
+    roll: -30.095010508485018
+Eye2ArmLeft:
+  translation:
+    x: 0.0794149894300877
+    y: -0.3175094533117007
+    z: -0.041977259095654855
+  quaternion:
+    qw: 0.6939997560552882
+    qx: -0.15156081065090482
+    qy: 0.6877693835395358
+    qz: 0.14955579004400985
+  euler_degree:
+    yaw: -5.545144258347089
+    pitch: 89.46966291617015
+    roll: -30.1326518478379
+Eye2ArmRight:
+  translation:
+    x: 0.08486003516849075
+    y: 0.3147651420112088
+    z: -0.06601183124926988
+  quaternion:
+    qw: 0.14859906270683998
+    qx: 0.6916396026564797
+    qy: -0.15897521507961976
+    qz: 0.688679794672549
+  euler_degree:
+    yaw: -86.64104444411075
+    pitch: -89.12569095818714
+    roll: -118.48274976360408
+Chest2ArmLeft:
+  translation:
+    x: 0.299665
+    y: 0.004646
+    z: -0.279654
+  quaternion:
+    qw: -0.48314884857927393
+    qx: 0.52355359267850832
+    qy: -0.51315741989595198
+    qz: 0.47867346711059527
+  euler_degree:
+    yaw: -90.2325
+    pitch: -1.60706
+    roll: -93.9648
+Chest2ArmRight:
+  translation:
+    x: 0.3111589
+    y: 0.015478
+    z: -0.277923
+  quaternion:
+    qw: 0.48292577384660967
+    qx: -0.51824792876540793
+    qy: 0.52067934518644698
+    qz: -0.47654464720656636
+  euler_degree:
+    yaw: -89.3148
+    pitch: 0.0891473
+    roll: -93.7573
+Chest2Neck:
+  translation:
+    x: 0
+    y: 0
+    z: 0
+  quaternion:
+    qw: 1
+    qx: 0
+    qy: 0
+    qz: 0
+  euler_degree:
+    yaw: 0
+    pitch: 0
+    roll: 0

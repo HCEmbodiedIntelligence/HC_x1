@@ -1,0 +1,96 @@
+# hc_tj 真机硬件配置（Marvin M6 CCS 双臂）
+robot_name: hc_tj
+
+# Marvin SDK 路径（run_hc_tj.sh 与编译时使用）
+marvin_sdk_path: vendor/marvin
+kinematics_config_path: CommonConfig/ccs_m6_40.MvKDCfg
+
+# 机器人控制器 IP
+robot_ip: [192, 168, 3, 190]
+
+# position: 位置跟随 | impedance: 关节阻抗
+control_mode: impedance
+joint_vel_ratio: 100
+joint_acc_ratio: 100
+
+control_rate_hz: 100
+reset_interpolation_steps: 200
+reset_interpolation_ms: 10
+auto_home_on_start: true
+
+# SDK Arm A = 左臂, Arm B = 右臂（与 TJ 现场接线一致）
+left_arm:
+  sdk_arm: A
+  arm_joints:
+    - Joint1_L
+    - Joint2_L
+    - Joint3_L
+    - Joint4_L
+    - Joint5_L
+    - Joint6_L
+    - Joint7_L
+  rest_j_pos: [1.44, -0.77, -1.44, -1.57, 0.0, 0.0, 0.0]
+
+right_arm:
+  sdk_arm: B
+  arm_joints:
+    - Joint1_R
+    - Joint2_R
+    - Joint3_R
+    - Joint4_R
+    - Joint5_R
+    - Joint6_R
+    - Joint7_R
+  rest_j_pos: [-1.44, -0.77, 1.44, -1.57, 0.0, 0.0, 0.0]
+
+# 腰部：本节点直接经 Redis 对接厂商控制进程的 action 30 (MOVE_SERVOJ)，
+# Redis I/O 跑在独立线程上，不会拖累双臂 100Hz 循环。
+# controller_v2.yml 的 free_joints 是 14 臂 + 3 腰；左右臂 IK 分别以
+# R_arm_0_Link/L_arm_0_Link 为基座，腰部是第三条受控运动链。
+# joint_states 缺腰部关节 TeleXperience 就不会下发 joint_cmd。
+# joints 留空则关闭腰部，退回纯双臂。
+waist:
+  joints: [leg_1, leg_2, zhi]
+  redis_host: 127.0.0.1
+  redis_port: 6379
+  redis_key_command: waist_move
+  redis_key_status: waist_status
+  status_in_degrees: true
+
+  # 控制器 4ms(250Hz) 伺服线程从持久化指令态限速逼近最新目标，插补在控制器侧完成。
+  # 下发必须连续，这条流同时充当看门狗心跳。
+  command_rate_hz: 100
+  max_velocity_deg_s: 20.0    # 控制器侧限速，SDK 要求 (0, 90]
+  servo_timeout_ms: 100       # 控制器看门狗，SDK 要求 [10, 1000]
+  cmd_timeout_sec: 0.25       # joint_cmd 断流判定，超时停发交给看门狗
+  state_timeout_sec: 0.5      # 反馈停更告警阈值，超时仍沿用最后一帧
+
+  # action 30 伺服线程直接 sendJointPositions，控制器侧没有限位检查，必须在这里夹紧。
+  # 取 SDK build_robot_model.cpp 的腰部限位（比 URDF 各窄约 3°）。
+  joint_limits_lower_deg: [-36.0, -24.0, -105.0]
+  joint_limits_upper_deg: [62.0, 135.0, 64.0]
+
+  # 回零目标，**弧度**（与上面双臂 rest_j_pos 同一约定），
+  # 取自 vr_configs.yml 的 folding_waist.rest_j_pos，两边必须一致。
+  # = [28.6°, 68.8°, -34.4°]。留空则回零只动双臂。
+  rest_j_pos: [0.5, 1.2, -0.6]
+  home_timeout_sec: 20.0      # 腰部限速 20°/s，全行程可能要十几秒
+  home_tolerance_deg: 0.5     # 到位判定容差
+
+# joint_states 双臂部分的顺序（与 URDF / vr_configs 一致，index0=右）；
+# 腰部关节由上面的 waist.joints 追加在后面
+all_joint_names:
+  - Joint1_R
+  - Joint2_R
+  - Joint3_R
+  - Joint4_R
+  - Joint5_R
+  - Joint6_R
+  - Joint7_R
+  - Joint1_L
+  - Joint2_L
+  - Joint3_L
+  - Joint4_L
+  - Joint5_L
+  - Joint6_L
+  - Joint7_L

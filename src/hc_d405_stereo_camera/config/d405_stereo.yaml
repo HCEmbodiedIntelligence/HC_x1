@@ -1,0 +1,28 @@
+d405_stereo_camera:
+  ros__parameters:
+    # 2026-08-10 在 niic 实机枚举得到。若交换了物理安装位置，只需交换两个序列号。
+    left.enabled: true
+    right.enabled: true
+    left.serial_no: "260322275504"
+    right.serial_no: "260322276941"
+
+    left.namespace: "/io_teleop/camera_d405_left"
+    right.namespace: "/io_teleop/camera_d405_right"
+    left.frame_prefix: "d405_left"
+    right.frame_prefix: "d405_right"
+
+    color.width: 640
+    color.height: 480
+    depth.width: 640
+    depth.height: 480
+    fps: 30
+    jpeg_quality: 80
+    png_compression: 3
+
+    # VR/TeleBox 直接读取左右两路 color/compressed，与原 camera_head/color 三路共存。
+    # 可选合成图默认关闭，且即使开启也使用独立话题，不占用 camera_head/color。
+    publish_vr_composite: false
+    vr_output_topic: "/io_teleop/camera_d405/vr/composite"
+    vr_frame_id: "d405_stereo_vr"
+    vr_max_pair_skew_ms: 50.0
+    swap_vr_views: false

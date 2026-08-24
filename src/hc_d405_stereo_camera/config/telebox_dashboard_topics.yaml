@@ -1,0 +1,15 @@
+# Merge these entries into collect_configs.<active>.customer_mapping_topics.
+# They are intentionally not listed in record_topics: a disconnected optional
+# D405 therefore does not trip the recorder watchdog. Select only the streams
+# needed by a collection task in TeleBox Dashboard.
+#
+# Native camera_info and depth/scale remain available in ROS.  The combined
+# /info JSON topic is used for recording because TeleBox schema 3.0 accepts
+# std_msgs/String and the 2 Hz republish stays below its 1.2 second watchdog.
+d405_dashboard_topics:
+  - {direction: in, msg_type: sensor_msgs/CompressedImage, original_name: /io_teleop/camera_d405_left/color/compressed, mapped_name: /io_teleop/camera_d405_left/color/compressed, recordable: true}
+  - {direction: in, msg_type: sensor_msgs/CompressedImage, original_name: /io_teleop/camera_d405_left/depth/compressed, mapped_name: /io_teleop/camera_d405_left/depth/compressed, recordable: true}
+  - {direction: in, msg_type: std_msgs/String, original_name: /io_teleop/camera_d405_left/info, mapped_name: /io_teleop/camera_d405_left/info, recordable: true}
+  - {direction: in, msg_type: sensor_msgs/CompressedImage, original_name: /io_teleop/camera_d405_right/color/compressed, mapped_name: /io_teleop/camera_d405_right/color/compressed, recordable: true}
+  - {direction: in, msg_type: sensor_msgs/CompressedImage, original_name: /io_teleop/camera_d405_right/depth/compressed, mapped_name: /io_teleop/camera_d405_right/depth/compressed, recordable: true}
+  - {direction: in, msg_type: std_msgs/String, original_name: /io_teleop/camera_d405_right/info, mapped_name: /io_teleop/camera_d405_right/info, recordable: true}

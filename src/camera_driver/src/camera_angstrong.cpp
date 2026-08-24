@@ -1,0 +1,566 @@
+#include "camera_angstrong.h"
+#include "pose_estimator.h"
+#include <chrono>
+#include <thread>
+
+using namespace std::chrono_literals;
+
+CameraAngstrong::CameraAngstrong(std::shared_ptr<rclcpp::Node> parent,
+    const std::vector<CameraConfig>& configs, const std::string& config_path,
+    PoseEstimator *pose_estimator)
+    : parent_(parent), configs_(configs), config_path_(config_path),
+    pose_estimator_(pose_estimator), running_(false)
+{}
+
+CameraAngstrong::~CameraAngstrong()
+{
+    stop();
+}
+
+bool CameraAngstrong::initialize()
+{
+    if (running_.load()) return true;
+    g_logger->info("[angstrong]: Initializing...");
+    try
+    {
+        int ret = AS_SDK_Init();
+        if (ret != 0)
+        {
+            g_logger->error("[angstrong]: Failed to initialize SDK: {}!", ret);
+            return false;
+        }
+
+        char sdk_version[64] = {0};
+        ret = AS_SDK_GetSwVersion(sdk_version, sizeof(sdk_version));
+        if (ret == 0)
+            g_logger->info("[angstrong]: SDK version: {}.", sdk_version);
+
+        AS_LISTENER_CALLBACK_S listener_callback;
+        listener_callback.privateData = this;
+        listener_callback.onAttached = onAttachedCallback;    
+        listener_callback.onDetached = onDetachedCallback;
+
+        g_logger->info("[angstrong]: Start listening ...");
+        if (AS_SDK_StartListener(listener_callback, AS_LISTENNER_TYPE_USB, true) != 0)
+        {
+            g_logger->error("[angstrong]: Failed to start listener!");
+            return false;
+        }
+
+        running_.store(true);
+        return true;
+    } 
+    catch (const std::exception& e)
+    {
+        g_logger->error("[angstrong]: Initialize error: {}!", e.what());
+        return false;
+    }
+}
+
+void CameraAngstrong::stop()
+{
+    if(!running_.load()) return;
+    running_.store(false);
+    AS_SDK_StopListener();
+    for (auto& [device, info] : angstrongs_)
+        if (info.param_timer)
+        {
+            info.param_timer->cancel();
+            info.param_timer.reset();
+        }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    for (auto it = device_list_.begin(); it != device_list_.end(); ++it)
+    {
+        AS_CAM_PTR device = (AS_CAM_PTR)(*it);
+        AngstrongInfo& info = angstrongs_[device];
+        g_logger->info("[{}] Close and delete camera from the list. C:D={}:{}", 
+            info.config.name, info.color_count, info.depth_count);
+        int ret = AS_SDK_StopStream(device, 0);
+        if (ret != 0)
+            g_logger->warn("[{}]: Stop stream failed!", info.config.name);
+        else
+            g_logger->info("[{}]: Stop stream succeed.", info.config.name);
+        ret = AS_SDK_CloseCamera(device);
+        if (ret != 0)
+            g_logger->warn("[{}]: Close camera failed!", info.config.name);
+        else
+            g_logger->info("[{}]: Close camera succeed.", info.config.name);
+        ret = AS_SDK_DestoryCamHandle(device);
+        if (ret != 0)
+            g_logger->warn("[{}]: Destory camera failed!", info.config.name);
+        else
+            g_logger->info("[{}]: Destory camera succeed.", info.config.name);
+    }
+    device_list_.clear();
+    angstrongs_.clear();
+    AS_SDK_Deinit();
+    g_logger->info("[angstrong]: Deinitialize SDK successfully.");
+}
+
+// 新帧数据
+void CameraAngstrong::processCameraFrame(AS_CAM_PTR device, const AS_SDK_Data_s* pst_data)
+{
+    if (!running_.load()) return;
+    auto it = angstrongs_.find(device);
+    if (it == angstrongs_.end())
+    {
+        AS_CAM_ATTR_S attr_t;
+        memset(&attr_t, 0, sizeof(AS_CAM_ATTR_S));
+        AS_SDK_GetCameraAttrs(device, attr_t);
+        g_logger->error("[angstrong]: Failed to find frame's camera {}!",
+            attr_t.attr.usbAttrs.port_numbers);
+        return;
+    }
+    if (!running_.load()) return;
+    AngstrongInfo& info = it->second;
+    sensor_msgs::msg::Image color_msg, depth_msg;
+    bool has_color = false, has_depth = false;
+    rclcpp::Time rgb_frame_time;
+    if (pst_data->rgbImg.data != nullptr)
+    {
+        // 创建彩色图像消息
+        color_msg.header.stamp = rclcpp::Time(pst_data->rgbImg.ts * 1000000);
+        color_msg.header.frame_id = info.config.frame_id;
+        color_msg.height = info.config.height;
+        color_msg.width = info.config.width;
+        color_msg.encoding = sensor_msgs::image_encodings::BGR8;
+        color_msg.is_bigendian = false;
+        color_msg.step = color_msg.width * 3;
+
+        rgb_frame_time = color_msg.header.stamp;
+        size_t last_digit =  static_cast<uint64_t>(color_msg.header.stamp.nanosec / 1e6) % 100;
+        if (last_digit == 1 || last_digit == 4 || last_digit == 8)
+        {
+            rclcpp::Time current_time = parent_->now();
+            int64_t current_ns = current_time.nanoseconds();
+            int64_t frame_ns = color_msg.header.stamp.nanosec;
+            int64_t time_diff_ns = current_ns - frame_ns;
+            double time_diff_ms = static_cast<double>(time_diff_ns) / 1e6;
+            g_logger->debug("[{}] Color {}, diff {:.1f} ms.",
+                info.config.name, rosTimeToStr(color_msg.header.stamp), time_diff_ms);
+        }
+
+        // 复制数据
+        size_t data_size = pst_data->rgbImg.size;
+        color_msg.data.resize(data_size);
+        memcpy(color_msg.data.data(), pst_data->rgbImg.data, data_size);
+        has_color = true;
+        ++info.color_count;
+    }
+    if (pst_data->depthImg.data != nullptr)
+    {
+        // 创建深度图像消息
+        depth_msg.header.stamp = rclcpp::Time(pst_data->depthImg.ts * 1000000);
+        depth_msg.header.frame_id = info.config.frame_id;
+        depth_msg.height = info.config.height;
+        depth_msg.width = info.config.width;
+        depth_msg.encoding = sensor_msgs::image_encodings::TYPE_16UC1;
+        depth_msg.is_bigendian = false;
+        depth_msg.step = depth_msg.width * 2;
+
+        size_t last_digit =  static_cast<uint64_t>(depth_msg.header.stamp.nanosec / 1e6) % 100;
+        if (last_digit == 1 || last_digit == 4 || last_digit == 8)
+        {
+            rclcpp::Time current_time = parent_->now(); 
+            int64_t current_ns = current_time.nanoseconds();
+            int64_t frame_ns = depth_msg.header.stamp.nanosec;
+            int64_t time_diff_ns = current_ns - frame_ns;
+            double time_diff_ms = static_cast<double>(time_diff_ns) / 1e6;
+            g_logger->debug("[{}] Depth {}, diff {:.1f} ms.",
+                info.config.name, rosTimeToStr(depth_msg.header.stamp), time_diff_ms);
+        }
+
+        // 复制数据
+        size_t data_size = pst_data->depthImg.size;
+        depth_msg.data.resize(data_size);
+        memcpy(depth_msg.data.data(), pst_data->depthImg.data, data_size);
+        has_depth = true;
+        ++info.depth_count;
+    }
+    if(has_color && has_depth)
+    {
+        // auto color_time = rclcpp::Time(color_msg.header.stamp);
+        // auto depth_time = rclcpp::Time(depth_msg.header.stamp);
+        // double time_diff = std::abs((color_time - depth_time).seconds());
+        // g_logger->info("[{}] {} | {} Color-depth {:.2f} ms", info.config.name,
+        //     rosTimeToStr(color_time),
+        //     rosTimeToStr(depth_time),
+        //     time_diff * 1000);
+        if(info.color_pub && info.depth_pub)
+        {
+            color_msg.header.stamp = depth_msg.header.stamp;
+            info.color_pub->publish(std::move(color_msg));
+            info.depth_pub->publish(depth_msg);
+            bool send_chassis = false;
+            if(info.config.send_chassis_depth && info.chassis_depth_pub)
+                if(info.depth_count % 2 == 0)
+                {
+                    send_chassis = true;
+                    info.chassis_depth_pub->publish(downsampleDepth(depth_msg));
+                }
+            uint64_t ts_ns =
+                static_cast<uint64_t>(depth_msg.header.stamp.sec) * 1'000'000'000ULL +
+                depth_msg.header.stamp.nanosec;
+            pose_estimator_->requestCameraPose(ts_ns, info.config.name, send_chassis);
+        }
+        if(info.param_ready == false && getParameter(device, info))
+            info.param_ready = true;
+        auto now = std::chrono::system_clock::now();
+        static auto last_sync = now;
+        // 60s 同步一次
+        if(now - last_sync > std::chrono::seconds(60))
+        {
+            last_sync = now;
+            auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+                now.time_since_epoch()
+            ).count();
+            int ret = AS_SDK_SetModuleTimeStamp(device, microseconds);
+            if (ret != 0)
+                g_logger->error("[{}] Failed to set module timestamp, error: {}!",
+                    info.config.name, ret);
+        }
+    }
+}
+
+sensor_msgs::msg::Image CameraAngstrong::downsampleDepth(const sensor_msgs::msg::Image& msg)
+{
+    sensor_msgs::msg::Image result;
+    result.header = msg.header;
+    result.height = msg.height / 2;
+    result.width  = msg.width / 2;
+    result.encoding = msg.encoding;
+    result.is_bigendian = msg.is_bigendian;
+    result.step = result.width * sizeof(uint16_t);
+    result.data.resize(result.step * result.height);
+
+    const uint16_t* src = reinterpret_cast<const uint16_t*>(msg.data.data());
+    uint16_t* dst = reinterpret_cast<uint16_t*>(result.data.data());
+    int src_width = msg.width;
+
+    // 使用指针操作，减少数组索引开销
+    for (int y = 0; y < result.height; ++y)
+    {
+        const uint16_t* src_row = src + (y * 2) * src_width;
+        uint16_t* dst_row = dst + y * result.width;
+        for (int x = 0; x < result.width; ++x)
+        {
+            const uint16_t* src_block = src_row + (x * 2);
+            // 快速平均，使用位运算优化除法
+            uint32_t sum = src_block[0] + src_block[1] +
+                           src_block[src_width] + src_block[src_width + 1];
+            dst_row[x] = static_cast<uint16_t>(sum >> 2);  // 除以4用右移2位
+        }
+    }
+    return result;
+}
+
+void CameraAngstrong::processCameraAttached(AS_CAM_ATTR_S* attr)
+{
+    std::string port_str(attr->attr.usbAttrs.port_numbers);
+    std::string cam_name;
+    AngstrongInfo info;
+    for(auto &cfg : configs_)
+        if(cfg.id == port_str)
+        { 
+            cam_name = cfg.name;
+            info.config = cfg;
+            break;
+        }
+    if(cam_name.empty())
+    {
+        g_logger->warn("[angstrong]: Unkown port: {}!", port_str);
+        return;
+    }
+
+    AS_CAM_PTR device;
+    if (AS_SDK_CreateCamHandle(device, attr) != 0 || device == nullptr)
+    {
+        g_logger->error("[{}] Create camera handle failed!", cam_name);
+        return;
+    }
+    g_logger->info("[{}] Create camera handle successfully.", cam_name);
+
+    int ret = AS_SDK_OpenCamera(device, config_path_.c_str());
+    if (ret != 0)
+    {
+        g_logger->error("[{}] Open camera failed, error: {}!", cam_name, ret);
+        return;
+    }
+    g_logger->info("[{}] Open camera successfully.", cam_name);
+
+    char fw_version[100] = {0};
+    ret = AS_SDK_GetFwVersion(device, fw_version, sizeof(fw_version));
+    if (ret == 0)
+        g_logger->info("[{}] Firmware version: {}.", cam_name, fw_version);
+
+    auto now = std::chrono::system_clock::now();
+    auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+        now.time_since_epoch()
+    ).count();
+    ret = AS_SDK_SetModuleTimeStamp(device, microseconds);
+    if (ret != 0)
+    {
+        g_logger->error("[{}] Failed to set module timestamp, error: {}!", 
+            cam_name, ret);
+        AS_SDK_CloseCamera(device);
+        return;
+    }
+    g_logger->info("[{}] Set module timestamp successfully.", cam_name);
+
+    // 注册流回调
+    AS_CAM_Stream_Cb_s callback;
+    callback.callback = streamCallbackStatic;
+    callback.privateData = this;
+    ret = AS_SDK_RegisterStreamCallback(device, &callback);
+    if (ret != 0)
+    {
+        g_logger->error("[{}] Failed to register callback, error: {}!",
+            cam_name, ret);
+        AS_SDK_CloseCamera(device);
+        return;
+    }
+    g_logger->info("[{}] Register stream callback successfully.", cam_name);
+
+    ret = AS_SDK_StartStream(device);
+    if (ret != 0)
+    {
+        g_logger->error("[{}] Failed to start stream, error: {}!",
+            cam_name, ret);
+        AS_SDK_CloseCamera(device);
+        return;
+    }
+    g_logger->info("[{}] Start streaming successfully.", cam_name);
+
+    bool exist = false;
+    for(auto it = angstrongs_.begin(); it != angstrongs_.end(); ++it)
+        if(it->second.config.name == info.config.name)
+        {
+            exist = true;
+            angstrongs_[device] = std::move(it->second);  // 移动
+            angstrongs_.erase(it); 
+            break;
+        }
+    if(!exist)
+    {
+        angstrongs_[device] = std::move(info);
+        createPublishers(angstrongs_[device]);
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    device_list_.push_back(device);
+}
+
+void CameraAngstrong::processCameraDetached(AS_CAM_ATTR_S* attr)
+{
+    std::string port_str(attr->attr.usbAttrs.port_numbers);
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = device_list_.begin(); it != device_list_.end(); ++it)
+    {
+        AS_CAM_PTR device = (AS_CAM_PTR)(*it);
+        AS_CAM_ATTR_S attr_t;
+        memset(&attr_t, 0, sizeof(AS_CAM_ATTR_S));
+        int ret = AS_SDK_GetCameraAttrs(device, attr_t);
+        if (ret == 0 && attr->type == AS_CAMERA_ATTR_LNX_USB &&
+            attr->attr.usbAttrs.bnum == attr_t.attr.usbAttrs.bnum &&
+            port_str == std::string(attr_t.attr.usbAttrs.port_numbers)) 
+        {
+            std::string cam_name = angstrongs_[device].config.name;
+            g_logger->info("[{}] Close and delete camera from the list.", cam_name);
+            ret = AS_SDK_StopStream(device, 0);
+            if (ret != 0)
+                g_logger->warn("[{}] Stop stream failed!", cam_name);
+            else
+                g_logger->info("[{}] Stop stream succeed.", cam_name);
+            ret = AS_SDK_CloseCamera(device);
+            if (ret != 0)
+                g_logger->warn("[{}] Close camera failed!", cam_name);
+            else
+                g_logger->info("[{}] Close camera succeed.", cam_name);
+            ret = AS_SDK_DestoryCamHandle(device);
+            if (ret != 0)
+                g_logger->warn("[{}] Destory camera failed!", cam_name);
+            else
+                g_logger->info("[{}] Destory camera succeed.", cam_name);
+            device_list_.erase(it);
+            return;
+        }
+    }
+    g_logger->warn("Unknown camera <{}> detached!", port_str);
+}
+
+void CameraAngstrong::onAttachedCallback(AS_CAM_ATTR_S* attr, void* private_data)
+{
+    CameraAngstrong* angstrong = reinterpret_cast<CameraAngstrong*>(private_data);
+    if (angstrong) angstrong->processCameraAttached(attr);
+}
+
+void CameraAngstrong::onDetachedCallback(AS_CAM_ATTR_S* attr, void* private_data)
+{
+    CameraAngstrong* angstrong = reinterpret_cast<CameraAngstrong*>(private_data);
+    if (angstrong)
+        angstrong->processCameraDetached(attr);
+}
+
+void CameraAngstrong::streamCallbackStatic(AS_CAM_PTR device,
+    const AS_SDK_Data_s* pst_data, void* private_data)
+{
+    CameraAngstrong* angstrong = reinterpret_cast<CameraAngstrong*>(private_data);
+    if (angstrong)
+        angstrong->processCameraFrame(device, pst_data);
+}
+
+bool CameraAngstrong::getParameter(AS_CAM_PTR device, AngstrongInfo& info)
+{
+    if(info.config.use_param_from_file)
+    {
+        g_logger->info("[{}] Using parameters from file.", info.config.name);
+        info.param_msg.rgb_fx = info.config.param.rgb_intrinsics.fx;
+        info.param_msg.rgb_fy = info.config.param.rgb_intrinsics.fy;
+        info.param_msg.rgb_cx = info.config.param.rgb_intrinsics.cx;
+        info.param_msg.rgb_cy = info.config.param.rgb_intrinsics.cy;
+        memcpy(info.param_msg.rgb_distortion_coeffs.data(), info.config.param.rgb_intrinsics.coeffs, sizeof(float)*5);
+
+        info.param_msg.dep_fx = info.config.param.dep_intrinsics.fx;
+        info.param_msg.dep_fy = info.config.param.dep_intrinsics.fy;
+        info.param_msg.dep_cx = info.config.param.dep_intrinsics.cx;
+        info.param_msg.dep_cy = info.config.param.dep_intrinsics.cy;
+        memcpy(info.param_msg.dep_distortion_coeffs.data(), info.config.param.dep_intrinsics.coeffs, sizeof(float)*5);
+
+        memcpy(info.param_msg.rotation.data(), info.config.param.extrinsics.rotation, sizeof(float)*9);
+        memcpy(info.param_msg.translation.data(), info.config.param.extrinsics.translation, sizeof(float)*3);
+    }
+    else
+    {
+        g_logger->info("[{}] Using online parameters.", info.config.name);
+        AS_CAM_Parameter_s pst_param;
+        if(AS_SDK_GetCamParameter(device, &pst_param) != 0)
+            return false;
+        info.param_msg.rgb_fx = pst_param.fxrgb;
+        info.param_msg.rgb_fy = pst_param.fyrgb;
+        info.param_msg.rgb_cx = pst_param.cxrgb;
+        info.param_msg.rgb_cy = pst_param.cyrgb;
+        info.param_msg.rgb_distortion_coeffs[0] = pst_param.K1rgb;
+        info.param_msg.rgb_distortion_coeffs[1] = pst_param.K2rgb;
+        info.param_msg.rgb_distortion_coeffs[2] = pst_param.P1rgb;
+        info.param_msg.rgb_distortion_coeffs[3] = pst_param.P2rgb;
+        info.param_msg.rgb_distortion_coeffs[4] = pst_param.K3rgb;
+
+        info.param_msg.dep_fx = pst_param.fxir;
+        info.param_msg.dep_fy = pst_param.fyir;
+        info.param_msg.dep_cx = pst_param.cxir;
+        info.param_msg.dep_cy = pst_param.cyir;
+        info.param_msg.dep_distortion_coeffs[0] = pst_param.K1ir;
+        info.param_msg.dep_distortion_coeffs[1] = pst_param.K2ir;
+        info.param_msg.dep_distortion_coeffs[2] = pst_param.P1ir;
+        info.param_msg.dep_distortion_coeffs[3] = pst_param.P2ir;
+        info.param_msg.dep_distortion_coeffs[4] = pst_param.K3ir;
+        info.param_msg.rotation[0] = pst_param.R00;
+        info.param_msg.rotation[1] = pst_param.R01;
+        info.param_msg.rotation[2] = pst_param.R02;
+        info.param_msg.rotation[3] = pst_param.R10;
+        info.param_msg.rotation[4] = pst_param.R11;
+        info.param_msg.rotation[5] = pst_param.R12;
+        info.param_msg.rotation[6] = pst_param.R20;
+        info.param_msg.rotation[7] = pst_param.R21;
+        info.param_msg.rotation[8] = pst_param.R22;
+        info.param_msg.translation[0] = pst_param.T1;
+        info.param_msg.translation[1] = pst_param.T2;
+        info.param_msg.translation[2] = pst_param.T3;
+    }
+
+    info.rgb_intrinsics.fx = info.param_msg.rgb_fx;
+    info.rgb_intrinsics.fy = info.param_msg.rgb_fy;
+    info.rgb_intrinsics.cx = info.param_msg.rgb_cx;
+    info.rgb_intrinsics.cy = info.param_msg.rgb_cy;
+
+    if(info.param_pub)
+    {
+        info.param_pub->publish(info.param_msg);
+        info.param_ready = true;
+        g_logger->info("[{}] Get and publish camera parameters successfully.", info.config.name);
+        return true;
+    }
+    return false;
+}
+
+void CameraAngstrong::createPublishers(AngstrongInfo& info)
+{
+    rclcpp::QoS qos = rclcpp::SensorDataQoS();
+    qos.keep_last(10);  // 保持最后10条消息
+    if (info.config.qos == "best_effort")
+    {
+        qos.best_effort();
+        g_logger->info("[{}] Using best_effort QoS.", info.config.name);
+    } 
+    else
+    {
+        qos.reliable();
+        g_logger->info("[{}] Using reliable QoS.", info.config.name);
+    }
+    if(!info.color_pub)
+    {
+        info.color_pub = parent_->create_publisher<sensor_msgs::msg::Image>(
+            info.config.color_topic, qos);
+        g_logger->info("[{}] Create color topic: {}.",
+            info.config.name, info.config.color_topic);
+    }
+    if(!info.depth_pub)
+    {
+        info.depth_pub = parent_->create_publisher<sensor_msgs::msg::Image>(
+            info.config.depth_topic, qos);
+        g_logger->info("[{}] Create depth topic: {}.",
+            info.config.name, info.config.depth_topic);
+    }
+    if(info.config.send_chassis_depth && !info.chassis_depth_pub)
+    {
+        info.chassis_depth_pub = parent_->create_publisher<sensor_msgs::msg::Image>(
+            info.config.chassis_depth_topic, qos);
+        g_logger->info("[{}] Create chassis depth topic: {}.",
+            info.config.name, info.config.chassis_depth_topic);
+    }
+
+    // 参数发布器
+    auto param_qos = rclcpp::QoS(rclcpp::KeepLast(1))
+        .transient_local().reliable();
+    if(!info.param_pub)
+    {
+        info.param_pub = parent_->create_publisher<camera_msgs::msg::CameraParameters>(
+            info.config.param_topic, param_qos);
+        g_logger->info("[{}] Create parameter topic: {}.",
+            info.config.name, info.config.param_topic);
+    }
+    if(info.config.send_chassis_depth && !info.chassis_param_pub)
+    {
+        info.chassis_param_pub = parent_->create_publisher<camera_msgs::msg::CameraParameters>(
+            info.config.chassis_param_topic, param_qos);
+        g_logger->info("[{}] Create chassis parameter topic: {}.",
+            info.config.name, info.config.chassis_param_topic);
+    }
+
+    // 定期发布参数
+    info.param_timer = parent_->create_wall_timer(
+        std::chrono::seconds(2),  // 每2秒发布一次
+        [&info]()
+        {
+            size_t sub_count = info.param_pub->get_subscription_count();
+            if (sub_count > 0 && sub_count != info.last_param && info.param_ready)
+            {
+                g_logger->info("[{}] New subscriber! Re-publishing parameters...", info.config.name);
+                // 简单直接：重新发布
+                info.param_pub->publish(info.param_msg);
+            }
+            info.last_param = sub_count;
+            if(info.config.send_chassis_depth)
+            {
+                size_t sub_count = info.chassis_param_pub->get_subscription_count();
+                if (sub_count > 0 && sub_count != info.last_chassis_param && info.param_ready)
+                {
+                    g_logger->info("[{}] New chassis subscriber! Re-publishing parameters...",
+                        info.config.name);
+                    info.chassis_param_pub->publish(info.param_msg);
+                }
+                info.last_chassis_param = sub_count;
+            }
+        });
+    g_logger->info("[{}] Create all topic publisher successfully.", info.config.name);
+}
