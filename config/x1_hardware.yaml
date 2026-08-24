@@ -5,9 +5,9 @@ control:
     feedback_topic: /io_teleop/joint_states
     output_topic: /io_teleop/joint_cmd
     rate_hz: 100.0
-    time_constant: 0.08
+    time_constant: 0.04
     max_velocity: 2.5
-    max_acceleration: 8.0
+    max_acceleration: 12.0
     deadband: 0.00015
     input_timeout: 0.15
     feedback_timeout: 0.5

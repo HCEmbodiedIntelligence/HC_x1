@@ -74,9 +74,9 @@ class JointCommandSmootherNode(Node):
 
         self.smoother = JointTrajectorySmoother(
             SmoothingLimits(
-                time_constant=float(config.get("time_constant", 0.08)),
+                time_constant=float(config.get("time_constant", 0.04)),
                 max_velocity=float(config.get("max_velocity", 2.5)),
-                max_acceleration=float(config.get("max_acceleration", 8.0)),
+                max_acceleration=float(config.get("max_acceleration", 12.0)),
                 deadband=float(config.get("deadband", 0.00015)),
             )
         )

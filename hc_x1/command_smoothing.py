@@ -11,9 +11,9 @@ from typing import Mapping, Sequence
 class SmoothingLimits:
     """Limits for the fixed-rate joint trajectory generator."""
 
-    time_constant: float = 0.08
+    time_constant: float = 0.04
     max_velocity: float = 2.5
-    max_acceleration: float = 8.0
+    max_acceleration: float = 12.0
     deadband: float = 0.00015
 
     def validate(self) -> None:

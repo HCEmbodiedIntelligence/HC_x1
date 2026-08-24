@@ -6,13 +6,13 @@ from hc_x1.command_smoothing import JointTrajectorySmoother, SmoothingLimits
 
 class JointTrajectorySmootherTests(unittest.TestCase):
     def setUp(self):
-        self.limits = SmoothingLimits(
-            time_constant=0.08,
-            max_velocity=2.5,
-            max_acceleration=8.0,
-            deadband=0.00015,
-        )
+        self.limits = SmoothingLimits()
         self.smoother = JointTrajectorySmoother(self.limits)
+
+    def test_low_latency_defaults_remain_acceleration_bounded(self):
+        defaults = SmoothingLimits()
+        self.assertEqual(defaults.time_constant, 0.04)
+        self.assertEqual(defaults.max_acceleration, 12.0)
 
     def test_reset_starts_from_feedback_without_command_jump(self):
         self.assertEqual(
@@ -20,8 +20,8 @@ class JointTrajectorySmootherTests(unittest.TestCase):
             [0.25],
         )
         positions, velocities = self.smoother.step(["joint"], [1.0], 0.01)
-        self.assertAlmostEqual(velocities[0], 0.08)
-        self.assertAlmostEqual(positions[0], 0.2508)
+        self.assertAlmostEqual(velocities[0], 0.12)
+        self.assertAlmostEqual(positions[0], 0.2512)
 
     def test_velocity_and_acceleration_are_bounded(self):
         self.smoother.reset(["joint"], [2.0], feedback={"joint": 0.0})

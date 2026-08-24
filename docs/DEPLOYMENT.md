@@ -37,4 +37,13 @@ redis-cli -h 192.168.0.3 ping
 
 ## 首次验收
 
-先在不连接通用控制项目时启动 `HC_X1`，确认关节状态和相机状态稳定。然后启动通用项目，保持实体急停可触达，从低速、小范围开始验证。若 `/io_teleop/joint_cmd` 存在第二个活动发布者，平滑节点会封锁输出；必须停止冲突控制器，不能绕过检查。
+先在不连接通用控制项目时启动 `HC_X1`，确认原始和标准关节反馈都接近 100 Hz，再确认压缩相机状态稳定。然后启动通用项目，保持实体急停可触达，从低速、小范围开始验证。若 `/io_teleop/joint_cmd` 存在第二个活动发布者，平滑节点会封锁输出；必须停止冲突控制器，不能绕过检查。
+
+```bash
+ROS_DOMAIN_ID=14 ros2 topic hz /io_teleop/joint_states
+ROS_DOMAIN_ID=14 ros2 topic hz /hc_teleop/joint_states
+```
+
+控制适配器和相机适配器分别写入 `control_adapter.log` 和
+`camera_adapter.log`。平滑器默认时间常数为 0.04 秒，最大加速度为
+12 rad/s²；首次真机验证仍需单关节、小幅、低速进行。

@@ -9,7 +9,7 @@
 | `/hc_teleop/joint_cmd_finger_left` | `/io_teleop/joint_cmd_finger_left` | `sensor_msgs/msg/JointState` |
 | `/hc_teleop/joint_cmd_finger_right` | `/io_teleop/joint_cmd_finger_right` | `sensor_msgs/msg/JointState` |
 
-关节命令是专用平滑节点唯一拥有的 X1 私有输出。标准适配节点不会转发机械臂关节命令，因此相机或状态回调阻塞不会改变伺服节拍。
+关节命令是专用平滑节点唯一拥有的 X1 私有输出。控制适配器不会转发机械臂关节命令；它与相机适配器分属独立进程，图像回调不会阻塞关节反馈、手指或底盘。关节反馈使用 Reliable + `KEEP_LAST(1)`，兼容 IK 订阅者且不积压旧帧。
 
 ## 状态输出
 
@@ -24,8 +24,4 @@
 | `/io_teleop/camera_d405_{left,right}/color/compressed` | `/hc_teleop/camera_d405_{left,right}/color/compressed` | `sensor_msgs/msg/CompressedImage` |
 | `/io_teleop/camera_d405_{left,right}/depth/compressed` | `/hc_teleop/camera_d405_{left,right}/depth/compressed` | `sensor_msgs/msg/CompressedImage` |
 
-头部和头顶相机支持原驱动 raw 图像的 JPEG 回退，但检测到已有压缩流时不会重复压缩发布。
-
-## VR 兼容输入
-
-X1 OmniHand 驱动仍需要私有 `io_msgs2/msg/VrData`。`hc_x1_standard_adapter` 将通用 `/vrdata` JSON 转换为该消息，同时兼容 `primary_axis`/旧 `primary` 和 `quaternion`/旧 `orientation` 字段。
+相机适配器只转发 `CompressedImage`，不订阅 raw `sensor_msgs/Image`，也不在 Python 中进行 JPEG 编码。OmniHand 使用上表中的标准左右手指命令，不再保留 `/vrdata` 到 X1 私有消息的旁路。

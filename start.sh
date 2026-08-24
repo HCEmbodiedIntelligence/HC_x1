@@ -80,10 +80,17 @@ HC_TJ_LOG_DIR="${LOG_DIR}/drivers" setsid bash \
   >"${LOG_DIR}/hardware.log" 2>&1 &
 PIDS+=("$!")
 
-log "启动 X1 标准话题适配..."
-setsid /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/standard_adapter.py" \
-  >"${LOG_DIR}/standard_adapter.log" 2>&1 &
+log "启动 X1 低延迟控制话题适配..."
+setsid /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/control_adapter.py" \
+  >"${LOG_DIR}/control_adapter.log" 2>&1 &
 PIDS+=("$!")
+
+if [[ " ${DRIVER_ARGS[*]} " != *" --no-camera "* ]]; then
+  log "启动 X1 独立压缩相机话题适配..."
+  setsid /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/camera_adapter.py" \
+    >"${LOG_DIR}/camera_adapter.log" 2>&1 &
+  PIDS+=("$!")
+fi
 
 log "启动 X1 100 Hz 关节命令平滑节点..."
 setsid /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/joint_command_smoother.py" \

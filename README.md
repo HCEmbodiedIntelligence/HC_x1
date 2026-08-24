@@ -8,7 +8,7 @@ X1 机器人独立硬件适配项目。它启动 X1 的双臂、腰部、底盘�
 
 ```text
 HC_X1/
-├── hc_x1/                 # 标准话题适配与 100 Hz 关节命令执行器
+├── hc_x1/                 # 独立控制/相机适配与 100 Hz 关节命令执行器
 ├── config/                # X1 硬件侧参数
 ├── src/                   # ROS 2 驱动与消息包
 ├── vendor/                # Marvin、OmniHand、相机 aarch64 SDK
@@ -45,9 +45,14 @@ HC Teleop /hc_teleop/joint_cmd
   -> /io_teleop/joint_cmd
   -> Marvin X1 driver
 
-X1 drivers /io_teleop/*
-  -> hc_x1_standard_adapter
-  -> HC Teleop /hc_teleop/*
+X1 control/state /io_teleop/*
+  -> hc_x1_control_adapter（独立进程、KEEP_LAST(1)）
+  -> HC Teleop control/state /hc_teleop/*
+
+X1 compressed cameras /io_teleop/camera_*
+  -> hc_x1_camera_adapter（独立进程）
+  -> HC Teleop compressed cameras /hc_teleop/camera_*
 ```
 
-硬件私有话题不会泄漏给通用系统。相机桥只发布标准压缩流供网页和 MCAP 录制，避免录制重复别名和不必要的未压缩图像。
+硬件私有话题不会泄漏给通用系统。相机适配器只订阅已经压缩的图像，
+不再在 Python 中订阅或编码 raw 图像；相机负载不会阻塞关节、手指和底盘回调。
