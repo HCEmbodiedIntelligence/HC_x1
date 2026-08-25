@@ -21,13 +21,16 @@ public:
     const auto output_topic = declare_parameter<std::string>(
       "output_topic", "/io_teleop/camera_head/depth");
     png_compression_ = std::clamp(
-      static_cast<int>(declare_parameter<int>("png_compression", 3)), 0, 9);
+      static_cast<int>(declare_parameter<int>("png_compression", 0)), 0, 9);
 
-    auto output_qos = rclcpp::QoS(rclcpp::KeepLast(3)).reliable().durability_volatile();
+    // Depth is a live sensor stream.  Do not let a slow network subscriber
+    // back-pressure capture/compression or queue stale frames.
+    auto output_qos = rclcpp::QoS(rclcpp::KeepLast(1))
+      .best_effort().durability_volatile();
     publisher_ = create_publisher<sensor_msgs::msg::CompressedImage>(output_topic, output_qos);
     subscription_ = create_subscription<sensor_msgs::msg::Image>(
       input_topic,
-      rclcpp::SensorDataQoS().keep_last(2),
+      rclcpp::SensorDataQoS().keep_last(1),
       std::bind(&DepthPngCompressor::on_image, this, std::placeholders::_1));
 
     RCLCPP_INFO(

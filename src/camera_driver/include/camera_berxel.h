@@ -3,11 +3,15 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/image_encodings.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <BerxelHawkContext.h>
 #include <BerxelHawkDevice.h>
 #include <BerxelHawkFrame.h>
+#include <atomic>
+#include <condition_variable>
 #include <deque>
+#include <thread>
 #include "config.h"
 #include "camera_msgs/msg/camera_parameters.hpp"
 
@@ -28,6 +32,15 @@ public:
     static void destroy();
 
 private:
+    struct FrameCopy
+    {
+        uint64_t timestamp{0};
+        int width{0};
+        int height{0};
+        BerxelHawkPixelType pixel_type{BERXEL_HAWK_PIXEL_INVALID_TYPE};
+        std::vector<uint8_t> data;
+    };
+
     void createPublishers();
     bool getParameter();
     // SDK回调函数
@@ -44,8 +57,14 @@ private:
     // 内部处理函数
     void processNewFrame(BerxelHawkStreamType stream_type,
         BerxelHawkFrame* p_frame);
-    void processColorFrame(BerxelHawkFrame* pFrame);
-    void processDepthFrame(BerxelHawkFrame* pFrame);
+    void enqueueFrame(BerxelHawkStreamType stream_type,
+        BerxelHawkFrame* p_frame);
+    void startFrameWorkers();
+    void stopFrameWorkers();
+    void colorWorkerMain();
+    void depthWorkerMain();
+    void processColorFrame(const FrameCopy& frame);
+    void processDepthFrame(const FrameCopy& frame);
     void processIrFrame(BerxelHawkFrame* pFrame);
     // 图像转换函数
     void convertDepthToCv16UC(uint16_t* pDepth, uint16_t* pCv16UC1,
@@ -80,6 +99,8 @@ private:
     // ROS发布器
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr color_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr direct_color_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr direct_depth_pub_;
     rclcpp::Publisher<camera_msgs::msg::CameraParameters>::SharedPtr param_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_pub_;
     // 参数发布定时器
@@ -89,6 +110,20 @@ private:
     // 流配置
     int stream_type_;
     std::mutex frame_mutex_;
+
+    // SDK callback only copies the newest frame.  Conversion and ROS publish
+    // run independently so a slow codec/subscriber cannot block acquisition.
+    std::atomic<bool> frame_workers_running_{false};
+    std::thread color_worker_;
+    std::thread depth_worker_;
+    std::mutex color_pending_mutex_;
+    std::mutex depth_pending_mutex_;
+    std::condition_variable color_pending_cv_;
+    std::condition_variable depth_pending_cv_;
+    FrameCopy pending_color_;
+    FrameCopy pending_depth_;
+    bool color_pending_{false};
+    bool depth_pending_{false};
 
     // 时间同步
     rclcpp::Time last_sync_time_;

@@ -2,6 +2,7 @@
 #include "pose_estimator.h"
 #include <memory>
 #include <chrono>
+#include <opencv2/imgcodecs.hpp>
 
 using namespace std::chrono_literals;
 
@@ -96,17 +97,32 @@ bool CameraBerxel::start()
         colorFrameMode.resolutionX = config_.width;
         colorFrameMode.resolutionY = config_.height;
     }
-    device_->setFrameMode(BERXEL_HAWK_COLOR_STREAM, &colorFrameMode);
-    device_->setFrameMode(BERXEL_HAWK_DEPTH_STREAM, &depthFrameMode);
-    g_logger->info("[{}] Set resolution to {}x{}",
-        config_.name, config_.width, config_.height);
+    // The SDK default is device/firmware dependent.  Explicitly request the
+    // 30 Hz mixed-stream mode needed by teleoperation for both streams.
+    colorFrameMode.framerate = 30;
+    depthFrameMode.framerate = 30;
+    const int color_mode_result =
+        device_->setFrameMode(BERXEL_HAWK_COLOR_STREAM, &colorFrameMode);
+    const int depth_mode_result =
+        device_->setFrameMode(BERXEL_HAWK_DEPTH_STREAM, &depthFrameMode);
+    device_->getCurrentFrameMode(BERXEL_HAWK_COLOR_STREAM, &colorFrameMode);
+    device_->getCurrentFrameMode(BERXEL_HAWK_DEPTH_STREAM, &depthFrameMode);
+    g_logger->info(
+        "[{}] Stream modes: color={}x{}@{} (set={}), depth={}x{}@{} (set={})",
+        config_.name,
+        colorFrameMode.resolutionX, colorFrameMode.resolutionY,
+        static_cast<int>(colorFrameMode.framerate), color_mode_result,
+        depthFrameMode.resolutionX, depthFrameMode.resolutionY,
+        static_cast<int>(depthFrameMode.framerate), depth_mode_result);
 
+    startFrameWorkers();
     int ret = device_->startStreams(stream_type_, onNewFrameCallback, this);
-	if(ret != 0)
-	{
+        if(ret != 0)
+        {
+        stopFrameWorkers();
         g_logger->error("[{}] Open berxel stream failed!", config_.name);
-		return false;
-	}
+                return false;
+        }
 
     g_logger->info("[{}] Starting berxel stream...", config_.name);
 	return true;
@@ -122,6 +138,7 @@ void CameraBerxel::stop()
             device_->stopStreams(stream_type_);
             g_logger->info("[{}] Stopping berxel stream...", config_.name);
         }
+        stopFrameWorkers();
         if(context_)
         {
             context_->closeDevice(device_);
@@ -145,7 +162,7 @@ void CameraBerxel::destroy()
     }
 }    
 
-void CameraBerxel::processNewFrame(BerxelHawkStreamType stream_type, 
+void CameraBerxel::processNewFrame(BerxelHawkStreamType stream_type,
     BerxelHawkFrame* p_frame)
 {
     try
@@ -153,10 +170,10 @@ void CameraBerxel::processNewFrame(BerxelHawkStreamType stream_type,
         switch (stream_type)
         {
             case BERXEL_HAWK_COLOR_STREAM:
-                processColorFrame(p_frame);
+                enqueueFrame(stream_type, p_frame);
                 break;
             case BERXEL_HAWK_DEPTH_STREAM:
-                processDepthFrame(p_frame);
+                enqueueFrame(stream_type, p_frame);
                 break;
             case berxel::BERXEL_HAWK_IR_STREAM:
             case berxel::BERXEL_HAWK_LIGHT_IR_STREAM:
@@ -174,13 +191,119 @@ void CameraBerxel::processNewFrame(BerxelHawkStreamType stream_type,
     if (device_) device_->releaseFrame(p_frame);
 }
 
-void CameraBerxel::processColorFrame(BerxelHawkFrame* p_frame)
+void CameraBerxel::enqueueFrame(
+    BerxelHawkStreamType stream_type, BerxelHawkFrame* p_frame)
+{
+    FrameCopy frame;
+    frame.timestamp = p_frame->getTimeStamp();
+    frame.width = p_frame->getWidth();
+    frame.height = p_frame->getHeight();
+    frame.pixel_type = p_frame->getPixelType();
+    const size_t data_size = p_frame->getDataSize();
+    frame.data.resize(data_size);
+    memcpy(frame.data.data(), p_frame->getData(), data_size);
+
+    if(stream_type == BERXEL_HAWK_COLOR_STREAM)
+    {
+        {
+            std::lock_guard<std::mutex> lock(color_pending_mutex_);
+            pending_color_ = std::move(frame);
+            color_pending_ = true;
+        }
+        color_pending_cv_.notify_one();
+    }
+    else if(stream_type == BERXEL_HAWK_DEPTH_STREAM)
+    {
+        {
+            std::lock_guard<std::mutex> lock(depth_pending_mutex_);
+            pending_depth_ = std::move(frame);
+            depth_pending_ = true;
+        }
+        depth_pending_cv_.notify_one();
+    }
+}
+
+void CameraBerxel::startFrameWorkers()
+{
+    if(frame_workers_running_.exchange(true)) return;
+    color_worker_ = std::thread(&CameraBerxel::colorWorkerMain, this);
+    depth_worker_ = std::thread(&CameraBerxel::depthWorkerMain, this);
+}
+
+void CameraBerxel::stopFrameWorkers()
+{
+    if(!frame_workers_running_.exchange(false)) return;
+    color_pending_cv_.notify_all();
+    depth_pending_cv_.notify_all();
+    if(color_worker_.joinable()) color_worker_.join();
+    if(depth_worker_.joinable()) depth_worker_.join();
+    {
+        std::lock_guard<std::mutex> lock(color_pending_mutex_);
+        color_pending_ = false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(depth_pending_mutex_);
+        depth_pending_ = false;
+    }
+}
+
+void CameraBerxel::colorWorkerMain()
+{
+    while(true)
+    {
+        FrameCopy frame;
+        {
+            std::unique_lock<std::mutex> lock(color_pending_mutex_);
+            color_pending_cv_.wait(lock, [this]() {
+                return color_pending_ || !frame_workers_running_.load();
+            });
+            if(!frame_workers_running_.load() && !color_pending_) break;
+            frame = std::move(pending_color_);
+            color_pending_ = false;
+        }
+        try
+        {
+            processColorFrame(frame);
+        }
+        catch(const std::exception& error)
+        {
+            g_logger->error("[{}] Color worker error: {}", config_.name, error.what());
+        }
+    }
+}
+
+void CameraBerxel::depthWorkerMain()
+{
+    while(true)
+    {
+        FrameCopy frame;
+        {
+            std::unique_lock<std::mutex> lock(depth_pending_mutex_);
+            depth_pending_cv_.wait(lock, [this]() {
+                return depth_pending_ || !frame_workers_running_.load();
+            });
+            if(!frame_workers_running_.load() && !depth_pending_) break;
+            frame = std::move(pending_depth_);
+            depth_pending_ = false;
+        }
+        try
+        {
+            processDepthFrame(frame);
+        }
+        catch(const std::exception& error)
+        {
+            g_logger->error("[{}] Depth worker error: {}", config_.name, error.what());
+        }
+    }
+}
+
+void CameraBerxel::processColorFrame(const FrameCopy& frame)
 {
     // 创建彩色图像消息
     sensor_msgs::msg::Image msg;
-    uint64_t ts = p_frame->getTimeStamp();
-    int width   = p_frame->getWidth();
-    int height  = p_frame->getHeight();
+    uint64_t ts = frame.timestamp;
+    int width   = frame.width;
+    int height  = frame.height;
 
     msg.header.stamp = rclcpp::Time(ts * 1000);
     msg.header.frame_id = config_.frame_id;
@@ -202,22 +325,31 @@ void CameraBerxel::processColorFrame(BerxelHawkFrame* p_frame)
     //         config_.name, rosTimeToStr(msg.header.stamp), time_diff_ms);
     // }
 
-    // 复制数据
-    size_t data_size = p_frame->getDataSize();
-    std::vector<uint8_t> rgb(width * height * 3);
-    memcpy(rgb.data(), p_frame->getData(), data_size);
-    bgr2rgb(rgb);
+    // 直接写入 ROS 消息，避免先复制到临时 vector，再复制一次。
+    size_t data_size = frame.data.size();
     msg.data.resize(data_size);
-    memcpy(msg.data.data(), rgb.data(), rgb.size());
+    memcpy(msg.data.data(), frame.data.data(), data_size);
+    bgr2rgb(msg.data);
 
-    // 发布图像
-    if(color_pub_) color_pub_->publish(std::move(msg));
+    // Encode in the acquisition process.  Sending a 750 KiB raw image through
+    // DDS to a separate compressor was the dominant source of dropped frames.
+    if(direct_color_pub_)
+    {
+        const cv::Mat image(height, width, CV_8UC3, msg.data.data(), msg.step);
+        auto compressed = std::make_unique<sensor_msgs::msg::CompressedImage>();
+        compressed->header = msg.header;
+        compressed->format = "jpeg";
+        const std::vector<int> params{cv::IMWRITE_JPEG_QUALITY, 80};
+        if(cv::imencode(".jpg", image, compressed->data, params))
+            direct_color_pub_->publish(std::move(compressed));
+    }
 
     if(config_.pointcloud_type == 2)
     {
         {
-            std::lock_guard<std::mutex> lock(rgb_mutex_);   
-            rgbs_.push_back(rgb);
+            std::lock_guard<std::mutex> lock(rgb_mutex_);
+            // 只有 RGB 点云模式才需要额外保留一份彩色帧。
+            rgbs_.push_back(msg.data);
             rgbs_ts_.push_back(ts);
             if (rgbs_.size() > 3) 
             {
@@ -225,17 +357,23 @@ void CameraBerxel::processColorFrame(BerxelHawkFrame* p_frame)
                 rgbs_ts_.pop_front();
             }
         }
-        tryPublishRgbCloud();
     }
+
+    // 发布图像后不再访问 msg，避免 move 后读取。
+    // Raw output remains available for diagnostics, but do not serialize a
+    // large frame when nobody consumes it.
+    if(color_pub_ && color_pub_->get_subscription_count() > 0)
+        color_pub_->publish(std::move(msg));
+    if(config_.pointcloud_type == 2) tryPublishRgbCloud();
 }
 
-void CameraBerxel::processDepthFrame(BerxelHawkFrame* p_frame)
+void CameraBerxel::processDepthFrame(const FrameCopy& frame)
 {
     // 创建深度图像消息
     sensor_msgs::msg::Image msg;
-    uint64_t ts = p_frame->getTimeStamp();
-    int width   = p_frame->getWidth();
-    int height  = p_frame->getHeight();
+    uint64_t ts = frame.timestamp;
+    int width   = frame.width;
+    int height  = frame.height;
 
     msg.header.stamp = rclcpp::Time(ts * 1000);
     msg.header.frame_id = config_.frame_id;
@@ -257,23 +395,46 @@ void CameraBerxel::processDepthFrame(BerxelHawkFrame* p_frame)
     //         config_.name, rosTimeToStr(msg.header.stamp), time_diff_ms);
     // }
 
-    // 分配内存并转换数据
-    size_t data_size = p_frame->getDataSize();
-    std::vector<uint16_t> depth(width * height);
-    convertDepthToCv16UC((uint16_t*)p_frame->getData(),
-        (uint16_t*)depth.data(), width, height, p_frame->getPixelType());
+    // 普通图像模式直接转换到 ROS 消息缓冲区；
+    // 只在启用点云时保留 uint16_t 临时缓冲。
+    size_t data_size = frame.data.size();
     msg.data.resize(data_size);
-    memcpy(msg.data.data(), depth.data(), depth.size() * sizeof(uint16_t));
+    std::vector<uint16_t> depth;
+    uint16_t * depth_output = nullptr;
+    if(config_.pointcloud_type > 0)
+    {
+        depth.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+        depth_output = depth.data();
+    }
+    else
+    {
+        depth_output = reinterpret_cast<uint16_t *>(msg.data.data());
+    }
+    convertDepthToCv16UC(
+        reinterpret_cast<uint16_t *>(const_cast<uint8_t *>(frame.data.data())),
+        depth_output, width, height, frame.pixel_type);
+    if(config_.pointcloud_type > 0)
+    {
+        memcpy(msg.data.data(), depth.data(), depth.size() * sizeof(uint16_t));
+    }
+
+    if(direct_depth_pub_)
+    {
+        const cv::Mat image(height, width, CV_16UC1, msg.data.data(), msg.step);
+        auto compressed = std::make_unique<sensor_msgs::msg::CompressedImage>();
+        compressed->header = msg.header;
+        compressed->format = msg.encoding + "; png";
+        const std::vector<int> params{cv::IMWRITE_PNG_COMPRESSION, 0};
+        if(cv::imencode(".png", image, compressed->data, params))
+            direct_depth_pub_->publish(std::move(compressed));
+    }
 
     // 发布深度图像
-    if(depth_pub_)
+    if(depth_pub_ && depth_pub_->get_subscription_count() > 0)
     {
         depth_pub_->publish(std::move(msg));
-        uint64_t timestamp_ns =
-            static_cast<uint64_t>(msg.header.stamp.sec) * 1'000'000'000ULL +
-            msg.header.stamp.nanosec;
-        pose_estimator_->requestCameraPose(timestamp_ns, config_.name);
     }
+    pose_estimator_->requestCameraPose(ts * 1000ULL, config_.name);
 
     if(config_.pointcloud_type > 0 && param_ready_)
     {
@@ -567,7 +728,8 @@ void CameraBerxel::removeFrames(bool rgb, size_t num)
 void CameraBerxel::createPublishers()
 {
     rclcpp::QoS qos = rclcpp::SensorDataQoS();
-    qos.keep_last(10);  // 保持最后10条消息
+    // 直播图像只保留最新帧，不在驱动内堆积过期大图。
+    qos.keep_last(1);
     if (config_.qos == "best_effort")
     {  
         qos.best_effort();
@@ -594,6 +756,23 @@ void CameraBerxel::createPublishers()
             config_.depth_topic, qos);
         g_logger->info("[{}] Create depth topic: {}.",
             config_.name, config_.depth_topic);
+    }
+
+    // The head stream is consumed by the standard HC camera adapter.  Publish
+    // compressed frames here to avoid two raw-image DDS copies and queues.
+    if(config_.name == "eye")
+    {
+        auto compressed_qos = rclcpp::QoS(rclcpp::KeepLast(1))
+            .best_effort().durability_volatile();
+        direct_color_pub_ =
+            parent_->create_publisher<sensor_msgs::msg::CompressedImage>(
+                "/io_teleop/camera_head/color", compressed_qos);
+        direct_depth_pub_ =
+            parent_->create_publisher<sensor_msgs::msg::CompressedImage>(
+                "/io_teleop/camera_head/depth", compressed_qos);
+        g_logger->info(
+            "[{}] Direct compressed output enabled: JPEG color + PNG depth.",
+            config_.name);
     }
 
     // 创建相机参数发布器

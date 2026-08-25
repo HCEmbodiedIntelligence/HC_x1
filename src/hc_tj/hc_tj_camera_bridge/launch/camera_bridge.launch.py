@@ -80,8 +80,6 @@ def generate_launch_description():
                 )
             ),
             camera_driver,
-            head_compressor,
-            head_depth_relay,
             head_calibration_bridge,
         ]
     )

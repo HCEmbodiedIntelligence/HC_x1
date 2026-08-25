@@ -65,6 +65,10 @@ if [[ " ${DRIVER_ARGS[*]} " != *" --no-d405 "* ]] && \
   log "未检测到 Intel RealSense D405，自动添加 --no-d405"
   DRIVER_ARGS+=(--no-d405)
 fi
+# --no-d405 only disables the external D405 pair.  The head camera must still
+# publish both the standard color and depth interfaces.  A diagnostic
+# color-only run remains available by explicitly setting
+# HC_X1_HEAD_VIDEO_ONLY=1 before starting this script.
 if [[ " ${DRIVER_ARGS[*]} " != *" --no-hands "* ]]; then
   log "在前台完成 OmniHand UART 权限与 pinmux 检查..."
   bash "${PROJECT_ROOT}/src/omnihand_o10_rs485_bridge/run_omnihand_rs485.sh" \

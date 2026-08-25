@@ -12,7 +12,10 @@ camera_bridge_head_depth:
   ros__parameters:
     input_topic: "/cameras/eye/depth"
     output_topic: "/io_teleop/camera_head/depth"
-    png_compression: 3
+    # Level 0 keeps 16-bit depth lossless but removes the expensive DEFLATE
+    # stage.  On Jetson this is the difference between a stale queue and a
+    # real-time 30 Hz latest-frame stream.
+    png_compression: 0
 
 camera_bridge_head_calibration:
   ros__parameters:

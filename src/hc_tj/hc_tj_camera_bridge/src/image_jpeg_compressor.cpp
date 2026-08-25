@@ -24,11 +24,14 @@ public:
       static_cast<int>(declare_parameter<int>("jpeg_quality", 80)), 1, 100);
     output_format_ = declare_parameter<std::string>("output_format", "jpeg");
 
-    auto output_qos = rclcpp::QoS(rclcpp::KeepLast(3)).reliable().durability_volatile();
+    // Color is a live sensor stream.  Always prefer the newest frame and do
+    // not block the camera path when a subscriber cannot keep up.
+    auto output_qos = rclcpp::QoS(rclcpp::KeepLast(1))
+      .best_effort().durability_volatile();
     publisher_ = create_publisher<sensor_msgs::msg::CompressedImage>(output_topic, output_qos);
     subscription_ = create_subscription<sensor_msgs::msg::Image>(
       input_topic,
-      rclcpp::SensorDataQoS().keep_last(2),
+      rclcpp::SensorDataQoS().keep_last(1),
       std::bind(&ImageJpegCompressor::on_image, this, std::placeholders::_1));
 
     RCLCPP_INFO(

@@ -24,4 +24,7 @@ export ANGSTRONG_SDK_LIBRARY="${ANGSTRONG_SDK_LIBRARY:-${PROJECT_ROOT}/vendor/an
 export BERXEL_SDK_LIBRARY="${BERXEL_SDK_LIBRARY:-${PROJECT_ROOT}/vendor/berxel}"
 
 cd "${PROJECT_ROOT}"
-colcon build --symlink-install
+# Camera conversion and compression are in the realtime path.  Keep production
+# builds optimized unless the caller explicitly supplies another build type.
+CMAKE_BUILD_TYPE="${HC_X1_CMAKE_BUILD_TYPE:-Release}"
+colcon build --symlink-install --cmake-args "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"

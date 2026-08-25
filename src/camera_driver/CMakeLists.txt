@@ -18,6 +18,7 @@ find_package(camera_msgs REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(OpenCV REQUIRED COMPONENTS core imgcodecs)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
 find_path(REDIS_PLUS_PLUS_INCLUDE_DIR NAMES sw/redis++/redis++.h)
@@ -64,6 +65,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${EIGEN3_INCLUDE_DIRS}
   ${HIREDIS_INCLUDE_DIRS}
   ${REDIS_PLUS_PLUS_INCLUDE_DIR}
+  ${OpenCV_INCLUDE_DIRS}
 )
 # 链接库
 target_link_libraries(${PROJECT_NAME} 
@@ -73,6 +75,7 @@ target_link_libraries(${PROJECT_NAME}
   nlohmann_json::nlohmann_json
   yaml-cpp
   spdlog::spdlog
+  ${OpenCV_LIBS}
 )
 target_link_libraries(${PROJECT_NAME}
   AngstrongCameraSdk
