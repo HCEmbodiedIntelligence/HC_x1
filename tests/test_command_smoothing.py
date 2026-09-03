@@ -42,6 +42,24 @@ class JointTrajectorySmootherTests(unittest.TestCase):
         self.assertEqual(positions, [0.0])
         self.assertEqual(velocities, [0.0])
 
+    def test_reinitialize_from_feedback_discards_old_trajectory(self):
+        # Move smoother towards an old target
+        self.smoother.reset(['j1', 'j2'], [1.0, 1.0], feedback={'j1': 0.0, 'j2': 0.0})
+        self.smoother.step(['j1', 'j2'], [1.0, 1.0], 0.02)
+        self.assertGreater(self.smoother.positions['j1'], 0.0)
+
+        # Reinitialize with fresh post-homing feedback
+        new_feedback = {'j1': -0.5, 'j2': 0.3}
+        output = self.smoother.reset(['j1', 'j2'], [-0.5, 0.3], feedback=new_feedback)
+        self.assertEqual(output, [-0.5, 0.3])
+        self.assertEqual(self.smoother.positions, {'j1': -0.5, 'j2': 0.3})
+        self.assertEqual(self.smoother.velocities, {'j1': 0.0, 'j2': 0.0})
+
+        # Next step towards a new target starts smoothly from new feedback without jump
+        pos, vel = self.smoother.step(['j1', 'j2'], [-0.4, 0.4], 0.01)
+        self.assertAlmostEqual(pos[0], -0.5 + vel[0] * 0.01)
+        self.assertAlmostEqual(pos[1], 0.3 + vel[1] * 0.01)
+
     def test_invalid_inputs_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "equal length"):
             self.smoother.step(["a"], [], 0.01)

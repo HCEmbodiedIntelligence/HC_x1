@@ -16,6 +16,7 @@
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "std_msgs/msg/float64_multi_array.hpp"
 #include "std_srvs/srv/trigger.hpp"
+#include "std_msgs/msg/bool.hpp"
 
 namespace sw::redis {
 class Redis;
@@ -74,6 +75,7 @@ class HcTjMarvinBridgeNode : public rclcpp::Node {
       const std::array<std::array<double, 6>, 2>& cartesian_wrenches);
   void joint_cmd_callback(const sensor_msgs::msg::JointState::SharedPtr msg);
   void home_robot();
+  void publish_hardware_ready(bool ready);
   void reset_service_callback(const std_srvs::srv::Trigger::Request::SharedPtr request,
                               std_srvs::srv::Trigger::Response::SharedPtr response);
 
@@ -150,6 +152,8 @@ class HcTjMarvinBridgeNode : public rclcpp::Node {
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_cmd_sub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_service_;
   rclcpp::TimerBase::SharedPtr state_timer_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr hardware_ready_pub_;
+  std::atomic<bool> hardware_ready_{false};
 };
 
 }  // namespace hc_tj_marvin_bridge

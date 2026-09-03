@@ -619,6 +619,16 @@ bool HcTjMarvinBridgeNode::verify_control_mode() {
   return false;
 }
 
+void HcTjMarvinBridgeNode::publish_hardware_ready(bool ready) {
+  hardware_ready_.store(ready);
+  if (!hardware_ready_pub_) {
+    return;
+  }
+  std_msgs::msg::Bool msg;
+  msg.data = ready;
+  hardware_ready_pub_->publish(msg);
+}
+
 void HcTjMarvinBridgeNode::setup_io_teleop_interfaces() {
   joint_state_pub_ =
       this->create_publisher<sensor_msgs::msg::JointState>("/io_teleop/joint_states", 10);
@@ -633,6 +643,12 @@ void HcTjMarvinBridgeNode::setup_io_teleop_interfaces() {
       "io_teleop_reset_robot",
       std::bind(&HcTjMarvinBridgeNode::reset_service_callback, this, std::placeholders::_1,
                 std::placeholders::_2));
+  rclcpp::QoS ready_qos(rclcpp::KeepLast(1));
+  ready_qos.reliable();
+  ready_qos.transient_local();
+  hardware_ready_pub_ = this->create_publisher<std_msgs::msg::Bool>(
+      "/io_teleop/hardware_ready", ready_qos);
+  publish_hardware_ready(false);
 }
 
 void HcTjMarvinBridgeNode::publish_end_effector_feedback(
@@ -887,7 +903,7 @@ std::vector<double> HcTjMarvinBridgeNode::clamp_waist_deg(const std::vector<doub
 }
 
 void HcTjMarvinBridgeNode::latch_waist_target(const sensor_msgs::msg::JointState& msg) {
-  if (!waist_control_enabled_ || waist_homing_.load()) {
+  if (!waist_control_enabled_ || waist_homing_.load() || homing_in_progress_.load() || !hardware_ready_.load()) {
     return;
   }
   std::vector<double> values(waist_cfg_.joints.size(), 0.0);
@@ -1022,17 +1038,25 @@ void HcTjMarvinBridgeNode::publish_joint_states() {
   }
 
   joint_state_pub_->publish(msg);
+  const bool ready = (!connect_arms_ || (robot_connected_ && cmd_target_initialized_ && !homing_in_progress_.load())) &&
+                     (!waist_control_enabled_ || (!waist_homing_.load() && waist_state_received_));
+  publish_hardware_ready(ready);
 }
 
 void HcTjMarvinBridgeNode::joint_cmd_callback(
     const sensor_msgs::msg::JointState::SharedPtr msg) {
-  if (msg->name.size() != msg->position.size()) {
+  if (msg->name.size() != msg->position.size() || msg->name.empty()) {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                         "joint_cmd 关节名称和位置数量不匹配");
+                         "joint_cmd 关节名与位置数不匹配或为空");
     return;
   }
 
-  // 腰部走 Redis，与 Marvin 是否连上无关，所以先锁存再判断双臂状态
+  // 1. HC_X1 回零期间丢弃全部目标指令（包括双臂和腰部）
+  if (homing_in_progress_.load() || waist_homing_.load() || !hardware_ready_.load()) {
+    return;
+  }
+
+  // 腰部由独立 Redis 驱动，回零完成后才锁存目标
   latch_waist_target(*msg);
 
   if (!connect_arms_ || !robot_connected_) {
@@ -1041,11 +1065,7 @@ void HcTjMarvinBridgeNode::joint_cmd_callback(
 
   if (!cmd_target_initialized_) {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                         "关节指令缓存未初始化，等待 joint state 首帧");
-    return;
-  }
-
-  if (homing_in_progress_.load()) {
+                         "关节指令缓冲未初始化，等待第一帧 joint state 反馈");
     return;
   }
 
@@ -1089,6 +1109,7 @@ void HcTjMarvinBridgeNode::joint_cmd_callback(
 // 腰部不像双臂那样由桥接插值：把目标交给控制器的 servoJ 伺服线程，
 // 它会按 max_velocity_deg_s 限速逼近，这里只负责等它到位。
 void HcTjMarvinBridgeNode::home_waist() {
+  publish_hardware_ready(false);
   {
     std::lock_guard<std::mutex> lock(waist_target_mutex_);
     waist_home_target_deg_ = waist_cfg_.rest_j_pos_deg;
@@ -1112,6 +1133,11 @@ void HcTjMarvinBridgeNode::home_waist() {
 
   // 松开后若遥操作仍在发 joint_cmd，腰部会立刻回到跟随；没有的话由看门狗保持位置
   waist_homing_.store(false);
+  {
+    const bool ready = (!connect_arms_ || (robot_connected_ && cmd_target_initialized_ && !homing_in_progress_.load())) &&
+                       (!waist_control_enabled_ || waist_state_received_);
+    publish_hardware_ready(ready);
+  }
   if (reached) {
     RCLCPP_INFO(this->get_logger(), "腰部回零完成");
   } else {
@@ -1141,6 +1167,7 @@ void HcTjMarvinBridgeNode::home_robot() {
     RCLCPP_WARN(this->get_logger(), "回零正在进行中，忽略重复请求");
     return;
   }
+  publish_hardware_ready(false);
 
   const bool home_arms = connect_arms_ && robot_connected_;
   const bool home_waist_enabled =
@@ -1162,6 +1189,8 @@ void HcTjMarvinBridgeNode::home_robot() {
       waist_thread.join();
     }
     homing_in_progress_.store(false);
+    publish_hardware_ready(!waist_control_enabled_ || (!waist_homing_.load() && waist_state_received_));
+
     RCLCPP_INFO(this->get_logger(), "回零完成（双臂未连接，仅腰部）");
     return;
   }
@@ -1238,6 +1267,7 @@ void HcTjMarvinBridgeNode::reset_service_callback(
 
   RCLCPP_INFO(this->get_logger(), "收到 io_teleop_reset_robot 回零请求（双臂=%s，腰部=%s）",
               arms_ready ? "是" : "否", waist_ready ? "是" : "否");
+  publish_hardware_ready(false);
   std::thread([this]() { home_robot(); }).detach();
   response->success = true;
   response->message = arms_ready && waist_ready ? "回零开始（双臂 + 腰部）"

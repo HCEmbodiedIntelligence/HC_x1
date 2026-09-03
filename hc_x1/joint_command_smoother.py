@@ -25,6 +25,7 @@ except ImportError:
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 
 from hc_x1.command_smoothing import JointTrajectorySmoother, SmoothingLimits
 
@@ -88,6 +89,9 @@ class JointCommandSmootherNode(Node):
         self.conflict_activity_topic = str(
             config.get("conflict_activity_topic", "/io_teleop/sol_q")
         )
+        self.hardware_ready_topic = str(
+            config.get("hardware_ready_topic", "/io_teleop/hardware_ready")
+        )
         allowed_publishers = config.get(
             "allowed_idle_output_publishers", ["robot_control_pid_node"]
         )
@@ -105,6 +109,7 @@ class JointCommandSmootherNode(Node):
             ("feedback_topic", self.feedback_topic),
             ("output_topic", self.output_topic),
             ("conflict_activity_topic", self.conflict_activity_topic),
+            ("hardware_ready_topic", self.hardware_ready_topic),
         ):
             if not topic.startswith("/"):
                 raise ValueError(f"command_smoothing.{key} must start with /")
@@ -132,7 +137,14 @@ class JointCommandSmootherNode(Node):
             self._conflict_activity_callback,
             qos_profile_sensor_data,
         )
+        self.create_subscription(
+            Bool,
+            self.hardware_ready_topic,
+            self._hardware_ready_callback,
+            reliable_qos,
+        )
 
+        self.hardware_ready = False
         self.target_names: list[str] = []
         self.target_positions: list[float] = []
         self.feedback: dict[str, float] = {}
@@ -154,7 +166,47 @@ class JointCommandSmootherNode(Node):
             f"acceleration={limits.max_acceleration:.2f} rad/s^2"
         )
 
+    def _hardware_ready_callback(self, message: Bool) -> None:
+        ready = bool(message.data)
+        was_ready = self.hardware_ready
+        self.hardware_ready = ready
+
+        if not ready:
+            if self.active or self.target_names:
+                self.active = False
+                self.smoother.clear()
+                self.target_names = []
+                self.target_positions = []
+                self.last_target_time = 0.0
+                self.get_logger().warning(
+                    "hardware is not ready (homing or disconnected); smoother targets dropped"
+                )
+            return
+
+        if ready and not was_ready:
+            # 2. 回零完成时，平滑器清空旧目标，并用最新关节反馈重新初始化。
+            self.target_names = []
+            self.target_positions = []
+            self.last_target_time = 0.0
+            self.active = False
+            self.smoother.clear()
+            feedback = self._fresh_feedback(time.monotonic())
+            if feedback:
+                names = list(feedback.keys())
+                positions = [float(feedback[name]) for name in names]
+                self.smoother.reset(names, positions, feedback=feedback)
+                self.get_logger().info(
+                    f"hardware ready confirmed: smoother reset from {len(feedback)} joint feedback values"
+                )
+            else:
+                self.get_logger().info(
+                    "hardware ready confirmed: smoother cleared old targets; awaiting fresh feedback/targets"
+                )
+
     def _target_callback(self, message: JointState) -> None:
+        if not self.hardware_ready:
+            # 1. HC_X1 回零期间丢弃全部目标指令。
+            return
         if len(message.name) != len(message.position) or not message.name:
             return
         if len(set(message.name)) != len(message.name):
@@ -174,6 +226,10 @@ class JointCommandSmootherNode(Node):
             return
         self.feedback = values
         self.last_feedback_time = time.monotonic()
+        if self.hardware_ready and not self.smoother.positions and self.feedback:
+            names = list(self.feedback.keys())
+            positions = [float(self.feedback[name]) for name in names]
+            self.smoother.reset(names, positions, feedback=self.feedback)
 
     def _conflict_activity_callback(self, _message: JointState) -> None:
         self.last_conflict_activity_time = time.monotonic()
@@ -239,6 +295,9 @@ class JointCommandSmootherNode(Node):
         elapsed = now - self.last_tick_time
         self.last_tick_time = now
         dt = min(max(elapsed, 0.002), 0.03)
+
+        if not self.hardware_ready:
+            return
 
         if not self._output_is_exclusive(now):
             return

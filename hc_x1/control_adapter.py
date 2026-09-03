@@ -11,7 +11,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64MultiArray, String
+from std_msgs.msg import Bool, Float64MultiArray, String
 
 try:
     from rclpy._rclpy_pybind11 import RCLError
@@ -39,6 +39,16 @@ class HcX1ControlAdapter(Node):
 
         # Robot feedback stays reliable for the IK subscribers, while
         # KEEP_LAST(1) prevents network jitter from delivering an old backlog.
+        self.hardware_ready_pub = self.create_publisher(
+            Bool, "/hc_teleop/hardware_ready", latest_reliable
+        )
+        self.create_subscription(
+            Bool,
+            "/io_teleop/hardware_ready",
+            self.hardware_ready_pub.publish,
+            latest_reliable,
+        )
+
         self.joint_state_pub = self.create_publisher(
             JointState, "/hc_teleop/joint_states", latest_reliable
         )
