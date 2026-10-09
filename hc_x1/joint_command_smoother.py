@@ -81,7 +81,7 @@ class JointCommandSmootherNode(Node):
                 deadband=float(config.get("deadband", 0.00015)),
             )
         )
-        self.input_topic = str(config.get("input_topic", "/hc_teleop/joint_cmd"))
+        self.input_topic = str(config.get("input_topic", "/action/joint_states"))
         self.feedback_topic = str(
             config.get("feedback_topic", "/io_teleop/joint_states")
         )

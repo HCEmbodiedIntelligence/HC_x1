@@ -35,7 +35,7 @@ class HcX1CameraAdapter(Node):
 
         self.head_color_pub = self.create_publisher(
             CompressedImage,
-            "/hc_teleop/camera_head/color/compressed",
+            "/observation/cameras/head/color/compressed",
             qos,
         )
         for topic in (
@@ -49,7 +49,7 @@ class HcX1CameraAdapter(Node):
 
         self.head_depth_pub = self.create_publisher(
             CompressedImage,
-            "/hc_teleop/camera_head/depth/compressed",
+            "/observation/cameras/head/depth/compressed",
             qos,
         )
         self.create_subscription(
@@ -61,7 +61,7 @@ class HcX1CameraAdapter(Node):
 
         self.overhead_color_pub = self.create_publisher(
             CompressedImage,
-            "/hc_teleop/camera_overhead/color/compressed",
+            "/observation/cameras/overhead/color/compressed",
             qos,
         )
         for topic in (
@@ -75,25 +75,25 @@ class HcX1CameraAdapter(Node):
 
         self._relay(
             "/io_teleop/camera_d405_left/color/compressed",
-            "/hc_teleop/camera_d405_left/color/compressed",
+            "/observation/cameras/d405_left/color/compressed",
             "d405_left_color_pub",
             qos,
         )
         self._relay(
             "/io_teleop/camera_d405_right/color/compressed",
-            "/hc_teleop/camera_d405_right/color/compressed",
+            "/observation/cameras/d405_right/color/compressed",
             "d405_right_color_pub",
             qos,
         )
         self._relay(
             "/io_teleop/camera_d405_left/depth/compressed",
-            "/hc_teleop/camera_d405_left/depth/compressed",
+            "/observation/cameras/d405_left/depth/compressed",
             "d405_left_depth_pub",
             qos,
         )
         self._relay(
             "/io_teleop/camera_d405_right/depth/compressed",
-            "/hc_teleop/camera_d405_right/depth/compressed",
+            "/observation/cameras/d405_right/depth/compressed",
             "d405_right_depth_pub",
             qos,
         )
@@ -101,7 +101,7 @@ class HcX1CameraAdapter(Node):
         custom_input = os.environ.get("HC_CUSTOM_CAMERA_INPUT", "").strip()
         custom_output = os.environ.get(
             "HC_CUSTOM_CAMERA_OUTPUT",
-            "/hc_teleop/camera_custom/color/compressed",
+            "/observation/cameras/custom/color/compressed",
         ).strip()
         if custom_input:
             self._relay(

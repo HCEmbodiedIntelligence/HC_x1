@@ -41,7 +41,7 @@ redis-cli -h 192.168.0.3 ping
 
 ```bash
 ROS_DOMAIN_ID=14 ros2 topic hz /io_teleop/joint_states
-ROS_DOMAIN_ID=14 ros2 topic hz /hc_teleop/joint_states
+ROS_DOMAIN_ID=14 ros2 topic hz /observation/joint_states
 ```
 
 控制适配器和相机适配器分别写入 `control_adapter.log` 和

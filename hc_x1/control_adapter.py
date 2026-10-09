@@ -40,7 +40,7 @@ class HcX1ControlAdapter(Node):
         # Robot feedback stays reliable for the IK subscribers, while
         # KEEP_LAST(1) prevents network jitter from delivering an old backlog.
         self.hardware_ready_pub = self.create_publisher(
-            Bool, "/hc_teleop/hardware_ready", latest_reliable
+            Bool, "/status/hardware/ready", latest_reliable
         )
         self.create_subscription(
             Bool,
@@ -50,7 +50,7 @@ class HcX1ControlAdapter(Node):
         )
 
         self.joint_state_pub = self.create_publisher(
-            JointState, "/hc_teleop/joint_states", latest_reliable
+            JointState, "/observation/joint_states", latest_reliable
         )
         self.create_subscription(
             JointState,
@@ -66,7 +66,7 @@ class HcX1ControlAdapter(Node):
         )
         self.create_subscription(
             Float64MultiArray,
-            "/hc_teleop/target_base_move",
+            "/action/base/command",
             self.base_move_pub.publish,
             latest_best_effort,
         )
@@ -78,7 +78,7 @@ class HcX1ControlAdapter(Node):
         )
         self.create_subscription(
             JointState,
-            "/hc_teleop/joint_cmd_finger_left",
+            "/action/left_hand/joint_states",
             self.finger_left_pub.publish,
             latest_best_effort,
         )
@@ -89,13 +89,13 @@ class HcX1ControlAdapter(Node):
         )
         self.create_subscription(
             JointState,
-            "/hc_teleop/joint_cmd_finger_right",
+            "/action/right_hand/joint_states",
             self.finger_right_pub.publish,
             latest_best_effort,
         )
 
         self.hand_state_pub = self.create_publisher(
-            JointState, "/hc_teleop/hand_joint_states", latest_reliable
+            JointState, "/observation/hands/joint_states", latest_reliable
         )
         self.create_subscription(
             JointState,
@@ -104,7 +104,7 @@ class HcX1ControlAdapter(Node):
             latest_best_effort,
         )
         self.hand_trigger_pub = self.create_publisher(
-            PoseArray, "/hc_teleop/hand_trigger", latest_reliable
+            PoseArray, "/observation/hands/triggers", latest_reliable
         )
         self.create_subscription(
             PoseArray,
@@ -114,7 +114,7 @@ class HcX1ControlAdapter(Node):
         )
 
         self.chassis_state_pub = self.create_publisher(
-            String, "/hc_teleop/chassis_state", latest_reliable
+            String, "/status/base", latest_reliable
         )
         self.create_subscription(
             String,

@@ -29,7 +29,7 @@ trap 'exit 0' INT TERM
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "用法: $0 [--no-camera] [--no-head-camera] [--no-d405] [--no-chassis] [--no-hands] [launch 参数]"
-  echo "只负责 X1 硬件和 /hc_teleop 标准接口；不启动 HC Teleop 中间件或逆解。"
+  echo "只负责 X1 硬件和 /action、/observation、/control、/status 标准接口；不启动 HC Teleop 中间件或逆解。"
   _CLEANED=1
   exit 0
 fi
@@ -102,7 +102,7 @@ setsid /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/joint_command_smoother.py" \
   >"${LOG_DIR}/joint_smoother.log" 2>&1 &
 PIDS+=("$!")
 
-log "HC_X1 已启动；标准接口为 /hc_teleop/*。按 Ctrl+C 只停止 X1 硬件侧。"
+log "HC_X1 已启动；标准接口为 /action/*、/observation/*、/control/*、/status/*。按 Ctrl+C 只停止 X1 硬件侧。"
 set +e
 wait -n "${PIDS[@]}"
 status=$?

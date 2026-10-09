@@ -1,6 +1,6 @@
 # HC_X1
 
-X1 机器人独立硬件适配项目。它启动 X1 的双臂、腰部、底盘、灵巧手和相机驱动，并向通用 `HC-teleop-robotic` 产品提供稳定的 `/hc_teleop` ROS 2 标准接口。
+X1 机器人独立硬件适配项目。它启动 X1 的双臂、腰部、底盘、灵巧手和相机驱动，并向通用 `HC-teleop-robotic` 产品提供稳定的 `/action、/observation、/control、/status` ROS 2 标准接口。
 
 本项目自带所需 ROS 包和 aarch64 厂商运行库，不依赖 `hc_io_suit`、`HC-teleop-robotic` 或用户目录中的其他源码工作空间。腰部和底盘仍依赖 X1 机器上已经部署的 Redis/硬件系统服务，详见 [部署说明](docs/DEPLOYMENT.md)。
 
@@ -40,18 +40,18 @@ ROS_DOMAIN_ID=14 ./start_real_robot_teleop.sh
 ## 控制链路
 
 ```text
-HC Teleop /hc_teleop/joint_cmd
+HC Teleop /action/joint_states
   -> hc_x1_joint_command_smoother（100 Hz、限速/限加速度/超时）
   -> /io_teleop/joint_cmd
   -> Marvin X1 driver
 
 X1 control/state /io_teleop/*
   -> hc_x1_control_adapter（独立进程、KEEP_LAST(1)）
-  -> HC Teleop control/state /hc_teleop/*
+  -> HC Teleop control/state /action/*、/observation/*、/control/*、/status/*
 
 X1 compressed cameras /io_teleop/camera_*
   -> hc_x1_camera_adapter（独立进程）
-  -> HC Teleop compressed cameras /hc_teleop/camera_*
+  -> HC Teleop compressed cameras /observation/cameras/*
 ```
 
 硬件私有话题不会泄漏给通用系统。相机适配器只订阅已经压缩的图像，

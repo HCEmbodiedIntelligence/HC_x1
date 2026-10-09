@@ -30,9 +30,9 @@ check_topic() {
 }
 
 echo "[HC_X1 CHECK] ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
-check_topic /hc_teleop/joint_states publisher
-check_topic /hc_teleop/joint_cmd subscriber
-check_topic /hc_teleop/target_base_move subscriber
-check_topic /hc_teleop/joint_cmd_finger_left subscriber
-check_topic /hc_teleop/joint_cmd_finger_right subscriber
+check_topic /observation/joint_states publisher
+check_topic /action/joint_states subscriber
+check_topic /action/base/command subscriber
+check_topic /action/left_hand/joint_states subscriber
+check_topic /action/right_hand/joint_states subscriber
 exit "${status}"
