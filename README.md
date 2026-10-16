@@ -32,7 +32,7 @@ ROS_DOMAIN_ID=14 ./start.sh
 
 ```bash
 cd ~/HC-teleop-robotic
-ROS_DOMAIN_ID=14 ./start_real_robot_teleop.sh
+ROS_DOMAIN_ID=14 ./run.sh teleop --config middleware/config.x1_jetson.yaml
 ```
 
 两个项目可以部署在同机或不同机器，但 `ROS_DOMAIN_ID` 必须一致，跨机时 `ROS_LOCALHOST_ONLY=0`。
