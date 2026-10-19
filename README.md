@@ -28,6 +28,14 @@ ROS_DOMAIN_ID=14 ./start.sh
 
 未安装 D405 时使用 `./start.sh --no-d405`。其他可选项包括 `--no-camera`、`--no-head-camera`、`--no-chassis` 和 `--no-hands`。启动后可另开终端执行 `ROS_DOMAIN_ID=14 ./check.sh`。
 
+`start.sh` 会在前台等待双臂初始化、启动回零（启用时）和标准关节接口就绪，
+通过后才打印“HC_X1 已启动”。若控制模式验证失败，会直接打印原始
+`A/B(ERR, State, ImpType)` 错误、详细日志路径，以非零状态退出并清理本次启动的进程。
+即使驱动节点仍存活，也不会把双臂连接失败视为启动成功。
+等待上限默认 60 秒，可通过 `HC_X1_STARTUP_TIMEOUT_SEC` 调整（最大 600 秒）。
+`arms:=false`、`waist:=false` 和配置中的腰部禁用会相应调整反馈检查。
+此检查只读取日志和 ROS 状态，不执行复位或附加运动命令；原有启动自动回零配置仍然生效。
+
 通用系统独立启动：
 
 ```bash

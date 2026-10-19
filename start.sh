@@ -78,6 +78,10 @@ fi
 
 log "ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
 log "日志目录: ${LOG_DIR}"
+# Reset the upper-body log before spawning so a reused HC_X1_LOG_DIR cannot
+# satisfy readiness or report an error from an earlier launch.
+mkdir -p "${LOG_DIR}/drivers"
+: >"${LOG_DIR}/drivers/upper_body.log"
 log "启动 X1 私有硬件驱动..."
 HC_TJ_LOG_DIR="${LOG_DIR}/drivers" setsid bash \
   "${PROJECT_ROOT}/src/hc_tj/run_hc_tj_all.sh" "${DRIVER_ARGS[@]}" \
@@ -101,6 +105,19 @@ setsid /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/joint_command_smoother.py" \
   --config "${PROJECT_ROOT}/config/x1_hardware.yaml" \
   >"${LOG_DIR}/joint_smoother.log" 2>&1 &
 PIDS+=("$!")
+
+CHECK_ARGS=(--log "${LOG_DIR}/drivers/upper_body.log"
+  --timeout "${HC_X1_STARTUP_TIMEOUT_SEC:-60}")
+for pid in "${PIDS[@]}"; do CHECK_ARGS+=(--pid "${pid}"); done
+for arg in "${DRIVER_ARGS[@]}"; do CHECK_ARGS+=(--launch-arg="${arg}"); done
+log "等待硬件初始化与标准关节接口就绪（最多 ${HC_X1_STARTUP_TIMEOUT_SEC:-60} 秒）..."
+if /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/startup_check.py" "${CHECK_ARGS[@]}"; then
+  :
+else
+  status=$?
+  err "HC_X1 启动失败；请先排除上方故障。正在清理本次启动的进程。"
+  exit "${status}"
+fi
 
 log "HC_X1 已启动；标准接口为 /action/*、/observation/*、/control/*、/status/*。按 Ctrl+C 只停止 X1 硬件侧。"
 set +e
