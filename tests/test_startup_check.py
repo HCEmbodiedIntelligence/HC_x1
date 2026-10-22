@@ -9,7 +9,13 @@ import time
 from types import SimpleNamespace
 import unittest
 
-from hc_x1.startup_check import Readiness, expected_joints, inspect_log, wait_for_startup
+from hc_x1.startup_check import (
+    Readiness,
+    controls_motion,
+    expected_joints,
+    inspect_log,
+    wait_for_startup,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 FAULT = '[ERROR] 控制模式验证失败：A(ERR=6, State=100, ImpType=1)，B(ERR=0, State=3, ImpType=1)\n'
@@ -56,6 +62,22 @@ class StartupCheckTests(unittest.TestCase):
         self.assertFalse(state.available(11.1))
         state.ready_message(SimpleNamespace(data=False), 10.2)
         self.assertFalse(state.available(10.2))
+
+    def test_read_only_modes_do_not_require_startup_motion(self):
+        config = {
+            'left_arm': {'arm_joints': [f'L{i}' for i in range(7)]},
+            'right_arm': {'arm_joints': [f'R{i}' for i in range(7)]},
+            'waist': {'joints': ['w1', 'w2', 'w3']},
+        }
+        self.assertTrue(controls_motion(config, []))
+        self.assertTrue(controls_motion(
+            config, ['left_arm_control:=false', 'waist_control:=false']))
+        self.assertFalse(controls_motion(
+            config, ['arms_control:=false', 'waist_control:=false']))
+        self.assertFalse(controls_motion(
+            config, ['arms:=false', 'waist_control:=false']))
+        self.assertTrue(controls_motion(
+            config, ['arms_control:=false', 'waist_control:=true']))
 
     def test_waist_home_message_is_not_whole_robot_home_completion(self):
         self.assertFalse(inspect_log('[node]: 腰部回零完成')[1])

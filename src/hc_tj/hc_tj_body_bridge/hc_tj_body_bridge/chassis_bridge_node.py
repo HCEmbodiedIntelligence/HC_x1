@@ -41,6 +41,7 @@ class ChassisBridgeNode(Node):
             "lateral_command_topic", "/io_teleop/target_base_lateral_move"
         )
         self.declare_parameter("stop_repeat_count", 8)
+        self.declare_parameter("enable_control", True)
 
         host = self.get_parameter("redis_host").get_parameter_value().string_value
         port = self.get_parameter("redis_port").get_parameter_value().integer_value
@@ -101,6 +102,9 @@ class ChassisBridgeNode(Node):
         self.stop_repeat_count = (
             self.get_parameter("stop_repeat_count").get_parameter_value().integer_value
         )
+        self.control_enabled = (
+            self.get_parameter("enable_control").get_parameter_value().bool_value
+        )
 
         self.redis_client = redis.Redis(
             host=host,
@@ -136,28 +140,34 @@ class ChassisBridgeNode(Node):
             Float64MultiArray, self.lateral_command_topic, 10
         )
 
-        self.base_move_sub = self.create_subscription(
-            Float64MultiArray,
-            "/io_teleop/target_base_move",
-            self.target_base_move_callback,
-            10,
-        )
-        self.vr_data_sub = self.create_subscription(
-            VrData,
-            self.vr_data_topic,
-            self.vr_data_callback,
-            QoSProfile(
-                reliability=ReliabilityPolicy.BEST_EFFORT,
-                history=HistoryPolicy.KEEP_LAST,
-                depth=10,
-            ),
-        )
-        self.create_timer(self.command_interval_sec, self.command_timer_callback)
-
-        self.get_logger().info(
-            f"底盘横移 <- {self.vr_data_topic} (r_thumb_stick_axis_y), "
-            f"前后/旋转 <- /io_teleop/target_base_move"
-        )
+        if self.control_enabled:
+            self.base_move_sub = self.create_subscription(
+                Float64MultiArray,
+                "/io_teleop/target_base_move",
+                self.target_base_move_callback,
+                10,
+            )
+            self.vr_data_sub = self.create_subscription(
+                VrData,
+                self.vr_data_topic,
+                self.vr_data_callback,
+                QoSProfile(
+                    reliability=ReliabilityPolicy.BEST_EFFORT,
+                    history=HistoryPolicy.KEEP_LAST,
+                    depth=10,
+                ),
+            )
+            self.command_timer = self.create_timer(
+                self.command_interval_sec, self.command_timer_callback
+            )
+            self.get_logger().info(
+                f"底盘控制开启：横移 <- {self.vr_data_topic} "
+                "(r_thumb_stick_axis_y)，前后/旋转 <- /io_teleop/target_base_move"
+            )
+        else:
+            self.get_logger().info(
+                "底盘只读模式：仅读取 agvState，不订阅运动目标、不写 taskGroupCmd"
+            )
         self.get_logger().info(
             f"记录话题: 状态 -> {self.chassis_state_topic} (agvState JSON), "
             f"横移命令 -> {self.lateral_command_topic} (vy m/s)"
@@ -183,7 +193,8 @@ class ChassisBridgeNode(Node):
         self.shutting_down = True
         self.state_stop_event.set()
         self.state_thread.join(timeout=1.0)
-        self.send_stop()
+        if self.control_enabled:
+            self.send_stop()
         return super().destroy_node()
 
     def state_poll_loop(self) -> None:
@@ -247,6 +258,8 @@ class ChassisBridgeNode(Node):
         return vx, vy, vw
 
     def send_speed(self, vx: float, vy: float, vw: float) -> None:
+        if not self.control_enabled:
+            return
         self.task_id += 1
         # This topic is output-only telemetry for rosbag/data recording. Nothing
         # in this bridge subscribes to it or uses it for chassis control.

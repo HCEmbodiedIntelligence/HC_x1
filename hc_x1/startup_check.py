@@ -48,6 +48,30 @@ def expected_joints(config, launch_args):
     return set(joints)
 
 
+def controls_motion(config, launch_args):
+    """Return whether startup is allowed to move any arm or waist joint."""
+    enabled = {
+        'arms': True,
+        'arms_control': True,
+        'left_arm_control': True,
+        'right_arm_control': True,
+        'waist': True,
+        'waist_control': True,
+    }
+    for arg in launch_args:
+        name, sep, value = arg.partition(':=')
+        if sep and name in enabled:
+            if value.lower() not in {'true', 'false', '1', '0', 'yes', 'no', 'on', 'off'}:
+                raise ValueError(f'invalid launch argument: {arg}')
+            enabled[name] = value.lower() in {'true', '1', 'yes', 'on'}
+    arms_control = (enabled['arms'] and enabled['arms_control'] and
+                    (enabled['left_arm_control'] or enabled['right_arm_control']))
+    waist_control = (enabled['waist'] and enabled['waist_control'] and
+                     config.get('waist', {}).get('enabled', True) and
+                     bool(config.get('waist', {}).get('joints', [])))
+    return arms_control or waist_control
+
+
 class Readiness:
     def __init__(self, expected):
         self.expected = expected
@@ -150,7 +174,8 @@ def main(argv=None):
     config_path = Path(get_package_share_directory('hc_tj_marvin_bridge_cpp')) / 'config/hardware.yaml'
     config = yaml.safe_load(config_path.read_text())
     readiness = Readiness(expected_joints(config, args.launch_arg))
-    require_home = bool(readiness.expected and config.get('auto_home_on_start', True))
+    require_home = bool(config.get('auto_home_on_start', True) and
+                        controls_motion(config, args.launch_arg))
     rclpy.init(args=[])
     node = rclpy.create_node('hc_x1_startup_check')
     qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)

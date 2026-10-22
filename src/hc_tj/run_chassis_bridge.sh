@@ -36,4 +36,4 @@ fi
 
 echo "[chassis_bridge] 启动底盘桥接"
 echo "[chassis_bridge] 配置: hc_tj_body_bridge/config/body.yaml"
-exec ros2 launch "${LAUNCH_FILE}"
+exec ros2 launch "${LAUNCH_FILE}" "$@"

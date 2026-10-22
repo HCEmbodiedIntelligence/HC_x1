@@ -102,6 +102,8 @@ class HcTjMarvinBridgeNode : public rclcpp::Node {
   bool auto_home_on_start_{true};
   bool auto_home_done_{false};
   bool connect_arms_{true};
+  bool left_arm_control_enabled_{true};
+  bool right_arm_control_enabled_{true};
   bool waist_control_enabled_{false};
   std::string kinematics_config_path_;
   bool kinematics_ready_{false};

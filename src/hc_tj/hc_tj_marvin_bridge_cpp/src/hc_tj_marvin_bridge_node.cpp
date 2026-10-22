@@ -172,11 +172,21 @@ HcTjMarvinBridgeNode::HcTjMarvinBridgeNode(const std::string& config_path)
   }
 
   connect_arms_ = this->declare_parameter<bool>("connect_arms", true);
+  const bool enable_arms_control =
+      this->declare_parameter<bool>("enable_arms_control", true);
+  const bool enable_left_arm_control =
+      this->declare_parameter<bool>("enable_left_arm_control", true);
+  const bool enable_right_arm_control =
+      this->declare_parameter<bool>("enable_right_arm_control", true);
   const bool enable_waist = this->declare_parameter<bool>("enable_waist", true);
   const bool enable_waist_control =
       this->declare_parameter<bool>("enable_waist_control", true);
 
   load_config(resolved_config);
+  left_arm_control_enabled_ =
+      connect_arms_ && enable_arms_control && enable_left_arm_control;
+  right_arm_control_enabled_ =
+      connect_arms_ && enable_arms_control && enable_right_arm_control;
   waist_cfg_.enabled = waist_cfg_.enabled && enable_waist;
   waist_control_enabled_ = waist_cfg_.enabled && enable_waist_control;
 
@@ -206,6 +216,9 @@ HcTjMarvinBridgeNode::HcTjMarvinBridgeNode(const std::string& config_path)
     if (!connect_robot()) {
       RCLCPP_ERROR(this->get_logger(), "Marvin 机器人连接失败，节点将继续运行但无法下发控制");
     }
+    RCLCPP_INFO(this->get_logger(), "机械臂控制：左臂=%s，右臂=%s（关闭时仍上报反馈）",
+                left_arm_control_enabled_ ? "开启" : "只读",
+                right_arm_control_enabled_ ? "开启" : "只读");
   }
 
   setup_io_teleop_interfaces();
@@ -468,7 +481,8 @@ bool HcTjMarvinBridgeNode::clear_arm_errors() {
     OnGetBuf(&dcss);
   }
 
-  if (dcss.m_State[0].m_ERRCode != 0 || dcss.m_State[0].m_CurState == 100) {
+  if (left_arm_control_enabled_ &&
+      (dcss.m_State[0].m_ERRCode != 0 || dcss.m_State[0].m_CurState == 100)) {
     RCLCPP_WARN(this->get_logger(), "清除 A 臂错误 (ERRCode=%d)", dcss.m_State[0].m_ERRCode);
     std::lock_guard<std::mutex> lock(sdk_mutex_);
     OnClearSet();
@@ -476,7 +490,8 @@ bool HcTjMarvinBridgeNode::clear_arm_errors() {
     OnSetSend();
     sleep_ms(200);
   }
-  if (dcss.m_State[1].m_ERRCode != 0 || dcss.m_State[1].m_CurState == 100) {
+  if (right_arm_control_enabled_ &&
+      (dcss.m_State[1].m_ERRCode != 0 || dcss.m_State[1].m_CurState == 100)) {
     RCLCPP_WARN(this->get_logger(), "清除 B 臂错误 (ERRCode=%d)", dcss.m_State[1].m_ERRCode);
     std::lock_guard<std::mutex> lock(sdk_mutex_);
     OnClearSet();
@@ -499,12 +514,16 @@ bool HcTjMarvinBridgeNode::connect_robot() {
   }
 
   sleep_ms(200);
-  clear_arm_errors();
+  const bool any_arm_control =
+      left_arm_control_enabled_ || right_arm_control_enabled_;
+  if (any_arm_control) {
+    clear_arm_errors();
+  }
 
   // 控制器可能停留在上一次运行的模式。SDK 建链后立即切换，必须早于
   // UDP 数据通道等待和启动回零，避免错误模式下继续启动机器人。
   robot_connected_ = true;
-  if (!setup_control_mode()) {
+  if (any_arm_control && !setup_control_mode()) {
     RCLCPP_ERROR(this->get_logger(), "Marvin 控制模式指令提交失败，终止启动");
     OnRelease();
     robot_connected_ = false;
@@ -534,7 +553,7 @@ bool HcTjMarvinBridgeNode::connect_robot() {
     return false;
   }
 
-  if (!verify_control_mode()) {
+  if (any_arm_control && !verify_control_mode()) {
     RCLCPP_ERROR(this->get_logger(), "Marvin 控制模式反馈验证失败，禁止回零和外部控制");
     OnRelease();
     robot_connected_ = false;
@@ -556,22 +575,30 @@ bool HcTjMarvinBridgeNode::setup_control_mode() {
   if (hw_control_mode_ == "impedance") {
     double k[7] = {8.0, 8.0, 7.0, 6.0, 4.0, 3.0, 2.0};
     double d[7] = {0.25, 0.25, 0.25, 0.20, 0.15, 0.12, 0.10};
-    ok = OnSetTargetState_A(ARM_STATE_TORQ) && ok;
-    ok = OnSetImpType_A(ARM_IMP_JOINT) && ok;
-    ok = OnSetJointKD_A(k, d) && ok;
-    ok = OnSetTargetState_B(ARM_STATE_TORQ) && ok;
-    ok = OnSetImpType_B(ARM_IMP_JOINT) && ok;
-    ok = OnSetJointKD_B(k, d) && ok;
-    ok = OnSetJointLmt_A(joint_vel_ratio_, joint_acc_ratio_) && ok;
-    ok = OnSetJointLmt_B(joint_vel_ratio_, joint_acc_ratio_) && ok;
-    RCLCPP_INFO(this->get_logger(), "已提交双臂关节阻抗模式，速度/加速度 %d%%",
+    if (left_arm_control_enabled_) {
+      ok = OnSetTargetState_A(ARM_STATE_TORQ) && ok;
+      ok = OnSetImpType_A(ARM_IMP_JOINT) && ok;
+      ok = OnSetJointKD_A(k, d) && ok;
+      ok = OnSetJointLmt_A(joint_vel_ratio_, joint_acc_ratio_) && ok;
+    }
+    if (right_arm_control_enabled_) {
+      ok = OnSetTargetState_B(ARM_STATE_TORQ) && ok;
+      ok = OnSetImpType_B(ARM_IMP_JOINT) && ok;
+      ok = OnSetJointKD_B(k, d) && ok;
+      ok = OnSetJointLmt_B(joint_vel_ratio_, joint_acc_ratio_) && ok;
+    }
+    RCLCPP_INFO(this->get_logger(), "已提交启用机械臂的关节阻抗模式，速度/加速度 %d%%",
                 joint_vel_ratio_);
   } else {
-    ok = OnSetTargetState_A(ARM_STATE_POSITION) && ok;
-    ok = OnSetJointLmt_A(joint_vel_ratio_, joint_acc_ratio_) && ok;
-    ok = OnSetTargetState_B(ARM_STATE_POSITION) && ok;
-    ok = OnSetJointLmt_B(joint_vel_ratio_, joint_acc_ratio_) && ok;
-    RCLCPP_INFO(this->get_logger(), "已提交双臂位置跟随模式，速度/加速度 %d%%",
+    if (left_arm_control_enabled_) {
+      ok = OnSetTargetState_A(ARM_STATE_POSITION) && ok;
+      ok = OnSetJointLmt_A(joint_vel_ratio_, joint_acc_ratio_) && ok;
+    }
+    if (right_arm_control_enabled_) {
+      ok = OnSetTargetState_B(ARM_STATE_POSITION) && ok;
+      ok = OnSetJointLmt_B(joint_vel_ratio_, joint_acc_ratio_) && ok;
+    }
+    RCLCPP_INFO(this->get_logger(), "已提交启用机械臂的位置跟随模式，速度/加速度 %d%%",
                 joint_vel_ratio_);
   }
   ok = OnSetSend() && ok;
@@ -587,16 +614,16 @@ bool HcTjMarvinBridgeNode::verify_control_mode() {
       std::lock_guard<std::mutex> lock(sdk_mutex_);
       OnGetBuf(&dcss);
     }
-    const bool arm_a_ok =
-        dcss.m_State[0].m_ERRCode == 0 &&
-        dcss.m_State[0].m_CurState == expected_state &&
-        (!impedance || dcss.m_In[0].m_ImpType == ARM_IMP_JOINT);
-    const bool arm_b_ok =
-        dcss.m_State[1].m_ERRCode == 0 &&
-        dcss.m_State[1].m_CurState == expected_state &&
-        (!impedance || dcss.m_In[1].m_ImpType == ARM_IMP_JOINT);
+    const bool arm_a_ok = !left_arm_control_enabled_ ||
+        (dcss.m_State[0].m_ERRCode == 0 &&
+         dcss.m_State[0].m_CurState == expected_state &&
+         (!impedance || dcss.m_In[0].m_ImpType == ARM_IMP_JOINT));
+    const bool arm_b_ok = !right_arm_control_enabled_ ||
+        (dcss.m_State[1].m_ERRCode == 0 &&
+         dcss.m_State[1].m_CurState == expected_state &&
+         (!impedance || dcss.m_In[1].m_ImpType == ARM_IMP_JOINT));
     if (arm_a_ok && arm_b_ok) {
-      RCLCPP_INFO(this->get_logger(), "双臂%s反馈验证通过（State=%d%s）",
+      RCLCPP_INFO(this->get_logger(), "启用机械臂的%s反馈验证通过（State=%d%s）",
                   impedance ? "关节阻抗模式" : "位置模式", expected_state,
                   impedance ? ", ImpType=1" : "");
       return true;
@@ -951,7 +978,9 @@ void HcTjMarvinBridgeNode::publish_joint_states() {
       cmd_target_initialized_ = true;
       RCLCPP_INFO(this->get_logger(), "已用 joint state 首帧初始化关节指令缓存");
 
-      if (auto_home_on_start_ && !auto_home_done_) {
+      const bool any_control_enabled = left_arm_control_enabled_ ||
+          right_arm_control_enabled_ || waist_control_enabled_;
+      if (auto_home_on_start_ && any_control_enabled && !auto_home_done_) {
         auto_home_done_ = true;
         RCLCPP_INFO(this->get_logger(), "启动后自动回零至 rest_j_pos");
         std::thread([this]() { home_robot(); }).detach();
@@ -991,7 +1020,8 @@ void HcTjMarvinBridgeNode::publish_joint_states() {
   }
 
   // 仅腰模式下没有双臂首帧可挂靠，改用腰部首帧触发自动回零
-  if (!connect_arms_ && auto_home_on_start_ && !auto_home_done_) {
+  if (!connect_arms_ && waist_control_enabled_ && auto_home_on_start_ &&
+      !auto_home_done_) {
     auto_home_done_ = true;
     RCLCPP_INFO(this->get_logger(), "启动后自动回零至 rest_j_pos（仅腰部）");
     std::thread([this]() { home_robot(); }).detach();
@@ -1059,7 +1089,8 @@ void HcTjMarvinBridgeNode::joint_cmd_callback(
   // 腰部由独立 Redis 驱动，回零完成后才锁存目标
   latch_waist_target(*msg);
 
-  if (!connect_arms_ || !robot_connected_) {
+  if (!connect_arms_ || !robot_connected_ ||
+      (!left_arm_control_enabled_ && !right_arm_control_enabled_)) {
     return;
   }
 
@@ -1085,9 +1116,9 @@ void HcTjMarvinBridgeNode::joint_cmd_callback(
       continue;
     }
     const double angle_deg = msg->position[i] * kRad2Deg;
-    if (side == "left") {
+    if (side == "left" && left_arm_control_enabled_) {
       cmd_arm_deg_left_[static_cast<size_t>(idx)] = angle_deg;
-    } else {
+    } else if (side == "right" && right_arm_control_enabled_) {
       cmd_arm_deg_right_[static_cast<size_t>(idx)] = angle_deg;
     }
   }
@@ -1101,8 +1132,12 @@ void HcTjMarvinBridgeNode::joint_cmd_callback(
 
   std::lock_guard<std::mutex> lock(sdk_mutex_);
   OnClearSet();
-  OnSetJointCmdPos_A(cmd_a);
-  OnSetJointCmdPos_B(cmd_b);
+  if (left_arm_control_enabled_) {
+    OnSetJointCmdPos_A(cmd_a);
+  }
+  if (right_arm_control_enabled_) {
+    OnSetJointCmdPos_B(cmd_b);
+  }
   OnSetSend();
 }
 
@@ -1169,7 +1204,11 @@ void HcTjMarvinBridgeNode::home_robot() {
   }
   publish_hardware_ready(false);
 
-  const bool home_arms = connect_arms_ && robot_connected_;
+  const bool home_left_arm =
+      connect_arms_ && robot_connected_ && left_arm_control_enabled_;
+  const bool home_right_arm =
+      connect_arms_ && robot_connected_ && right_arm_control_enabled_;
+  const bool home_arms = home_left_arm || home_right_arm;
   const bool home_waist_enabled =
       waist_control_enabled_ && !waist_cfg_.rest_j_pos_deg.empty();
   if (waist_control_enabled_ && waist_cfg_.rest_j_pos_deg.empty()) {
@@ -1226,13 +1265,21 @@ void HcTjMarvinBridgeNode::home_robot() {
     {
       std::lock_guard<std::mutex> lock(sdk_mutex_);
       OnClearSet();
-      OnSetJointCmdPos_A(cmd_l);
-      OnSetJointCmdPos_B(cmd_r);
+      if (home_left_arm) {
+        OnSetJointCmdPos_A(cmd_l);
+      }
+      if (home_right_arm) {
+        OnSetJointCmdPos_B(cmd_r);
+      }
       OnSetSend();
     }
     for (int i = 0; i < 7; ++i) {
-      cmd_arm_deg_left_[static_cast<size_t>(i)] = cmd_l[i];
-      cmd_arm_deg_right_[static_cast<size_t>(i)] = cmd_r[i];
+      if (home_left_arm) {
+        cmd_arm_deg_left_[static_cast<size_t>(i)] = cmd_l[i];
+      }
+      if (home_right_arm) {
+        cmd_arm_deg_right_[static_cast<size_t>(i)] = cmd_r[i];
+      }
     }
     sleep_ms(reset_interpolation_ms_);
   }
@@ -1249,7 +1296,9 @@ void HcTjMarvinBridgeNode::home_robot() {
 void HcTjMarvinBridgeNode::reset_service_callback(
     const std_srvs::srv::Trigger::Request::SharedPtr /*request*/,
     std_srvs::srv::Trigger::Response::SharedPtr response) {
-  const bool arms_ready = connect_arms_ && robot_connected_ && cmd_target_initialized_;
+  const bool arms_ready = connect_arms_ && robot_connected_ &&
+      cmd_target_initialized_ &&
+      (left_arm_control_enabled_ || right_arm_control_enabled_);
   const bool waist_ready =
       waist_control_enabled_ && !waist_cfg_.rest_j_pos_deg.empty();
 

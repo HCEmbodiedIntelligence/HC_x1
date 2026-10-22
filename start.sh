@@ -2,6 +2,13 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  echo "用法: $0 [设备:=false] [设备_control:=false] [--no-*] [launch 参数]"
+  echo "控制开关: arms_control、left_arm_control、right_arm_control、waist_control、chassis_control"
+  echo "设备开关: arms、waist、chassis、hands、camera、head_camera、d405"
+  echo "只负责 X1 硬件和 /action、/observation、/control、/status 标准接口；不启动 HC Teleop 中间件或逆解。"
+  exit 0
+fi
 LOG_DIR="${HC_X1_LOG_DIR:-${PROJECT_ROOT}/runtime/session_$(date +'%Y%m%d_%H%M%S')}"
 PIDS=()
 _CLEANED=0
@@ -27,12 +34,6 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 0' INT TERM
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  echo "用法: $0 [--no-camera] [--no-head-camera] [--no-d405] [--no-chassis] [--no-hands] [launch 参数]"
-  echo "只负责 X1 硬件和 /action、/observation、/control、/status 标准接口；不启动 HC Teleop 中间件或逆解。"
-  _CLEANED=1
-  exit 0
-fi
 if [[ ! -f "${PROJECT_ROOT}/install/setup.bash" ]]; then
   err "尚未构建，请先执行 ${PROJECT_ROOT}/build.sh"
   exit 2
@@ -69,7 +70,11 @@ fi
 # publish both the standard color and depth interfaces.  A diagnostic
 # color-only run remains available by explicitly setting
 # HC_X1_HEAD_VIDEO_ONLY=1 before starting this script.
-if [[ " ${DRIVER_ARGS[*]} " != *" --no-hands "* ]]; then
+if [[ " ${DRIVER_ARGS[*],,} " != *" --no-hands "* ]] &&
+   [[ " ${DRIVER_ARGS[*],,} " != *" hands:=false "* ]] &&
+   [[ " ${DRIVER_ARGS[*],,} " != *" hands:=0 "* ]] &&
+   [[ " ${DRIVER_ARGS[*],,} " != *" hands:=no "* ]] &&
+   [[ " ${DRIVER_ARGS[*],,} " != *" hands:=off "* ]]; then
   log "在前台完成 OmniHand UART 权限与 pinmux 检查..."
   bash "${PROJECT_ROOT}/src/omnihand_o10_rs485_bridge/run_omnihand_rs485.sh" \
     --prepare-only
@@ -93,7 +98,11 @@ setsid /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/control_adapter.py" \
   >"${LOG_DIR}/control_adapter.log" 2>&1 &
 PIDS+=("$!")
 
-if [[ " ${DRIVER_ARGS[*]} " != *" --no-camera "* ]]; then
+if [[ " ${DRIVER_ARGS[*],,} " != *" --no-camera "* ]] &&
+   [[ " ${DRIVER_ARGS[*],,} " != *" camera:=false "* ]] &&
+   [[ " ${DRIVER_ARGS[*],,} " != *" camera:=0 "* ]] &&
+   [[ " ${DRIVER_ARGS[*],,} " != *" camera:=no "* ]] &&
+   [[ " ${DRIVER_ARGS[*],,} " != *" camera:=off "* ]]; then
   log "启动 X1 独立压缩相机话题适配..."
   setsid /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/camera_adapter.py" \
     >"${LOG_DIR}/camera_adapter.log" 2>&1 &

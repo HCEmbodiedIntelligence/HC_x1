@@ -5,6 +5,7 @@
 #   ./run_hc_tj_all.sh
 #   ./run_hc_tj_all.sh --no-hands --no-chassis
 #   ./run_hc_tj_all.sh arms:=false          # 透传给 run_hc_tj.sh
+#   ./run_hc_tj_all.sh left_arm_control:=false chassis_control:=false
 #
 # 日志目录: /tmp/hc_tj_logs_<pid>/（可通过 HC_TJ_LOG_DIR 覆盖）
 
@@ -19,8 +20,10 @@ ENABLE_CAMERA=true
 ENABLE_D405=true
 ENABLE_CHASSIS=true
 ENABLE_HANDS=true
+ENABLE_WAIST=true
 UPPER_BODY_ARGS=()
 D405_ARGS=()
+CHASSIS_ARGS=()
 
 usage() {
   cat <<'EOF'
@@ -34,9 +37,16 @@ hc_tj 真机一键启动
   --no-d405-right  右臂 D405 未安装
   --no-chassis   不启动底盘 Redis 桥接
   --no-hands     不启动 OmniHand RS485 灵巧手桥接
+  chassis:=false       不启动底盘（等价于 --no-chassis）
+  chassis_control:=false  底盘只读：保留状态，不下发速度
+  hands:=false         不启动灵巧手（等价于 --no-hands）
+  camera:=false        不启动任何相机（等价于 --no-camera）
+  head_camera:=false   不启动头部相机
+  d405:=false          不启动双 D405
   -h, --help     显示帮助
 
-其余参数透传给 run_hc_tj.sh（如 arms:=false）。
+其余参数透传给 run_hc_tj.sh（如 arms:=false、waist_control:=false、
+left_arm_control:=false、right_arm_control:=false）。
 EOF
 }
 
@@ -69,6 +79,66 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-hands)
       ENABLE_HANDS=false
+      shift
+      ;;
+    camera:=false|camera:=0|camera:=no|camera:=off)
+      ENABLE_CAMERA=false
+      ENABLE_D405=false
+      shift
+      ;;
+    head_camera:=false|head_camera:=0|head_camera:=no|head_camera:=off)
+      ENABLE_CAMERA=false
+      shift
+      ;;
+    d405:=false|d405:=0|d405:=no|d405:=off)
+      ENABLE_D405=false
+      shift
+      ;;
+    hands:=false|hands:=0|hands:=no|hands:=off)
+      ENABLE_HANDS=false
+      shift
+      ;;
+    chassis:=false|chassis:=0|chassis:=no|chassis:=off)
+      ENABLE_CHASSIS=false
+      shift
+      ;;
+    chassis_control:=false|chassis_control:=0|chassis_control:=no|chassis_control:=off)
+      CHASSIS_ARGS+=(control:=false)
+      shift
+      ;;
+    chassis_control:=true|chassis_control:=1|chassis_control:=yes|chassis_control:=on)
+      CHASSIS_ARGS+=(control:=true)
+      shift
+      ;;
+    chassis:=true|chassis:=1|chassis:=yes|chassis:=on)
+      ENABLE_CHASSIS=true
+      shift
+      ;;
+    hands:=true|hands:=1|hands:=yes|hands:=on)
+      ENABLE_HANDS=true
+      shift
+      ;;
+    camera:=true|camera:=1|camera:=yes|camera:=on)
+      ENABLE_CAMERA=true
+      ENABLE_D405=true
+      shift
+      ;;
+    head_camera:=true|head_camera:=1|head_camera:=yes|head_camera:=on)
+      ENABLE_CAMERA=true
+      shift
+      ;;
+    d405:=true|d405:=1|d405:=yes|d405:=on)
+      ENABLE_D405=true
+      shift
+      ;;
+    waist:=false|waist:=0|waist:=no|waist:=off)
+      ENABLE_WAIST=false
+      UPPER_BODY_ARGS+=("$1")
+      shift
+      ;;
+    waist:=true|waist:=1|waist:=yes|waist:=on)
+      ENABLE_WAIST=true
+      UPPER_BODY_ARGS+=("$1")
       shift
       ;;
     -h|--help)
@@ -158,7 +228,9 @@ ensure_workspace() {
 }
 
 preflight() {
-  if ! redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1; then
+  if [[ "${ENABLE_WAIST}" == true ]] &&
+    ! redis-cli -h 127.0.0.1 -p 6379 ping >/dev/null 2>&1
+  then
     log "错误: 腰部 Redis (127.0.0.1:6379) 不可达"
     log "请先启动: systemctl is-active watchdog-waist-control.service"
     log "不接腰部时把 config/hardware.yaml 的 waist.joints 置空"
@@ -228,7 +300,7 @@ if [[ "${ENABLE_HANDS}" == true ]]; then
 fi
 
 if [[ "${ENABLE_CHASSIS}" == true ]]; then
-  start_component chassis "${SCRIPT_DIR}/run_chassis_bridge.sh"
+  start_component chassis "${SCRIPT_DIR}/run_chassis_bridge.sh" "${CHASSIS_ARGS[@]}"
 fi
 
 if [[ "${ENABLE_CAMERA}" == true ]]; then

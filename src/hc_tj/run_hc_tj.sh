@@ -8,6 +8,10 @@
 #   ./run_hc_tj.sh waist:=false
 # 双臂运动、腰部状态只读：
 #   ./run_hc_tj.sh waist:=true waist_control:=false
+# 左臂只读、右臂可控：
+#   ./run_hc_tj.sh left_arm_control:=false
+# 双臂只读（反馈保留）：
+#   ./run_hc_tj.sh arms_control:=false
 
 set -euo pipefail
 
@@ -17,9 +21,25 @@ MARVIN_SDK="${MARVIN_SDK_PATH:-${TELEOP_WS}/vendor/marvin}"
 LAUNCH_FILE="${SCRIPT_DIR}/launch/hc_tj.launch.py"
 WAIST_ENABLED=true
 WAIST_CONTROL_ENABLED=true
+ARMS_ENABLED=true
+ARMS_CONTROL_ENABLED=true
+LEFT_ARM_CONTROL_ENABLED=true
+RIGHT_ARM_CONTROL_ENABLED=true
 
 for arg in "$@"; do
   case "${arg,,}" in
+    arms:=false|arms:=0|arms:=no|arms:=off)
+      ARMS_ENABLED=false
+      ;;
+    arms_control:=false|arms_control:=0|arms_control:=no|arms_control:=off)
+      ARMS_CONTROL_ENABLED=false
+      ;;
+    left_arm_control:=false|left_arm_control:=0|left_arm_control:=no|left_arm_control:=off)
+      LEFT_ARM_CONTROL_ENABLED=false
+      ;;
+    right_arm_control:=false|right_arm_control:=0|right_arm_control:=no|right_arm_control:=off)
+      RIGHT_ARM_CONTROL_ENABLED=false
+      ;;
     waist:=false|waist:=0|waist:=no|waist:=off)
       WAIST_ENABLED=false
       ;;
@@ -61,6 +81,13 @@ set -u
 
 export MARVIN_SDK_PATH="${MARVIN_SDK}"
 
+if [[ "${ARMS_ENABLED}" == true ]]; then
+  if [[ "${ARMS_CONTROL_ENABLED}" == false ]]; then
+    echo "[hc_tj] 双臂模式：状态只读（不切换控制模式、不回零、不下发关节命令）"
+  else
+    echo "[hc_tj] 机械臂控制：左臂=$([[ "${LEFT_ARM_CONTROL_ENABLED}" == true ]] && echo 开启 || echo 只读)，右臂=$([[ "${RIGHT_ARM_CONTROL_ENABLED}" == true ]] && echo 开启 || echo 只读)"
+  fi
+fi
 if [[ "${WAIST_ENABLED}" == true && "${WAIST_CONTROL_ENABLED}" == false ]]; then
   echo "[hc_tj] 上半身模式：Marvin 双臂 + 腰部状态只读（不下发腰部命令）"
 elif [[ "${WAIST_ENABLED}" == true ]]; then
