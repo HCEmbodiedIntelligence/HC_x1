@@ -57,7 +57,7 @@
         </disablePositiveAcks>
       </qos>
     </data_writer>
-    <data_writer profile_name="/io_teleop/target_base_move">
+    <data_writer profile_name="/action/base/command">
       <topic>
         <historyQos>
           <kind>KEEP_LAST</kind>

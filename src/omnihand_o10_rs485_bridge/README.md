@@ -61,14 +61,14 @@ ros2 launch omnihand_o10_rs485_bridge omnihand_o10_rs485_bridge.launch.py \
 
 | 类型 | 话题 | 说明 |
 |------|------|------|
-| 订阅 | `/io_teleop/joint_cmd_finger_left` | 左手 10 关节 rad |
-| 订阅 | `/io_teleop/joint_cmd_finger_right` | 右手 10 关节 rad |
-| 订阅 | `/io_teleop/vr_data` | 可选扳机模式：左右中指（握把）扳机分别控制左右手 |
-| 发布 | `/io_teleop/vibration_feedback_exo` | 外骨骼震动反馈 `Float64MultiArray[10]`（0–4 右手五指，5–9 左手五指，范围 0–10） |
-| 发布 | `/io_teleop/hand_joint_states` | `JointState`，实际反馈换算的 20 个主动关节角（右 10 + 左 10，rad） |
-| 发布 | `/io_teleop/hand_trigger` | `PoseArray`，`poses[0]=左`、`poses[1]=右`；`position.x=模拟量`、`position.y=数字状态` |
+| 订阅 | `/action/left_hand/joint_states` | 左手 10 关节 rad |
+| 订阅 | `/action/right_hand/joint_states` | 右手 10 关节 rad |
+| 订阅 | `/control/vr/io_data` | 可选扳机模式：左右中指（握把）扳机分别控制左右手 |
+| 发布 | `/observation/hands/vibration_feedback` | 外骨骼震动反馈 `Float64MultiArray[10]`（0–4 右手五指，5–9 左手五指，范围 0–10） |
+| 发布 | `/observation/hands/joint_states` | `JointState`，实际反馈换算的 20 个主动关节角（右 10 + 左 10，rad） |
+| 发布 | `/observation/hands/triggers` | `PoseArray`，`poses[0]=左`、`poses[1]=右`；`position.x=模拟量`、`position.y=数字状态` |
 
-外骨骼关节 rad 经映射表线性插值到电机位置 0–4096（对齐 `main_rs485_ros2.cc`），**100 Hz（10ms）** 周期下发 `SetAllJointMotorPosi`。触觉通过 `GetTactileSensorData` 读取，默认 **10 Hz** 发布到 `/io_teleop/vibration_feedback_exo`（**BEST_EFFORT**）。
+外骨骼关节 rad 经映射表线性插值到电机位置 0–4096（对齐 `main_rs485_ros2.cc`），**100 Hz（10ms）** 周期下发 `SetAllJointMotorPosi`。触觉通过 `GetTactileSensorData` 读取，默认 **10 Hz** 发布到 `/observation/hands/vibration_feedback`（**BEST_EFFORT**）。
 
 ## 参数
 
@@ -79,14 +79,14 @@ ros2 launch omnihand_o10_rs485_bridge omnihand_o10_rs485_bridge.launch.py \
 | `uart_baudrate` | `460800` | 波特率 |
 | `hand_device_id` | `1` | RS485 设备 ID |
 | `enable_vibration_feedback` | `true` | 是否发布外骨骼震动反馈 |
-| `vibration_topic` | `/io_teleop/vibration_feedback_exo` | 震动反馈话题 |
+| `vibration_topic` | `/observation/hands/vibration_feedback` | 震动反馈话题 |
 | `vibration_rate_hz` | `10.0` | 触觉发布频率（Hz） |
-| `hand_joint_state_topic` | `/io_teleop/hand_joint_states` | 实际手指关节状态话题 |
+| `hand_joint_state_topic` | `/observation/hands/joint_states` | 实际手指关节状态话题 |
 | `hand_joint_state_rate_hz` | `20.0` | 实际手指关节状态发布频率（Hz） |
-| `hand_trigger_topic` | `/io_teleop/hand_trigger` | 标准 `geometry_msgs/msg/PoseArray` 中指扳机话题 |
+| `hand_trigger_topic` | `/observation/hands/triggers` | 标准 `geometry_msgs/msg/PoseArray` 中指扳机话题 |
 | `ignore_placeholder_finger_cmd` | `true` | 忽略 TeleXperience 全零占位指令 |
-| `enable_vr_trigger_control` | `false` | 启用 VR 中指（握把）扳机线性控制；启用后屏蔽 `joint_cmd_finger_*` |
-| `vr_data_topic` | `/io_teleop/vr_data` | `io_msgs2/msg/VrData` 输入话题 |
+| `enable_vr_trigger_control` | `false` | 启用 VR 中指（握把）扳机线性控制；启用后屏蔽标准手指命令 |
+| `vr_data_topic` | `/control/vr/io_data` | `io_msgs2/msg/VrData` 输入话题，仅启用扳机直控时订阅 |
 | `vr_close_time_sec` | `0.6` | 从张开到握拳的最短线性过渡时间 |
 | `vr_open_time_sec` | `0.6` | 从握拳到张开的最短线性过渡时间 |
 | `vr_command_timeout_sec` | `0.5` | VR 数据超时后自动张开的等待时间 |

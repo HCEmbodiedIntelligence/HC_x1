@@ -42,14 +42,14 @@ OmniHandO10Rs485BridgeNode::OmniHandO10Rs485BridgeNode()
   enable_vibration_feedback_ =
       declare_parameter<bool>("enable_vibration_feedback", true);
   vibration_topic_ = declare_parameter<std::string>(
-      "vibration_topic", "/io_teleop/vibration_feedback_exo");
+      "vibration_topic", "/observation/hands/vibration_feedback");
   vibration_rate_hz_ = declare_parameter<double>("vibration_rate_hz", 10.0);
   hand_joint_state_topic_ = declare_parameter<std::string>(
-      "hand_joint_state_topic", "/io_teleop/hand_joint_states");
+      "hand_joint_state_topic", "/observation/hands/joint_states");
   hand_joint_state_rate_hz_ =
       declare_parameter<double>("hand_joint_state_rate_hz", 20.0);
   hand_trigger_topic_ = declare_parameter<std::string>(
-      "hand_trigger_topic", "/io_teleop/hand_trigger");
+      "hand_trigger_topic", "/observation/hands/triggers");
   ignore_placeholder_finger_cmd_ =
       declare_parameter<bool>("ignore_placeholder_finger_cmd", true);
   placeholder_joint_threshold_ =
@@ -57,7 +57,7 @@ OmniHandO10Rs485BridgeNode::OmniHandO10Rs485BridgeNode()
   enable_vr_trigger_control_ =
       declare_parameter<bool>("enable_vr_trigger_control", false);
   vr_data_topic_ =
-      declare_parameter<std::string>("vr_data_topic", "/io_teleop/vr_data");
+      declare_parameter<std::string>("vr_data_topic", "/control/vr/io_data");
   vr_axis_min_ = declare_parameter<double>("vr_axis_min", 0.0);
   vr_axis_max_ = declare_parameter<double>("vr_axis_max", 1.0);
   vr_trigger_deadzone_ =
@@ -100,13 +100,12 @@ OmniHandO10Rs485BridgeNode::OmniHandO10Rs485BridgeNode()
 
   hand_trigger_pub_ = create_publisher<geometry_msgs::msg::PoseArray>(
       hand_trigger_topic_, rclcpp::QoS(20));
-  rclcpp::SensorDataQoS vr_qos;
-  vr_qos.keep_last(5);
-  vr_data_sub_ = create_subscription<io_msgs2::msg::VrData>(
-      vr_data_topic_, vr_qos,
-      [this](const io_msgs2::msg::VrData::SharedPtr msg) { onVrData(msg); });
-
   if (enable_vr_trigger_control_) {
+    rclcpp::SensorDataQoS vr_qos;
+    vr_qos.keep_last(5);
+    vr_data_sub_ = create_subscription<io_msgs2::msg::VrData>(
+        vr_data_topic_, vr_qos,
+        [this](const io_msgs2::msg::VrData::SharedPtr msg) { onVrData(msg); });
     right_.finger_directions = interpolateVrMotorPos(0.0);
     left_.finger_directions = interpolateVrMotorPos(0.0);
     last_control_time_ = std::chrono::steady_clock::now();
@@ -117,7 +116,7 @@ OmniHandO10Rs485BridgeNode::OmniHandO10Rs485BridgeNode()
 
   if (enable_right_ && !enable_vr_trigger_control_) {
     right_sub_ = create_subscription<sensor_msgs::msg::JointState>(
-        "/io_teleop/joint_cmd_finger_right", cmd_qos,
+        "/action/right_hand/joint_states", cmd_qos,
         [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
           if (msg->name.size() != msg->position.size()) {
             return;
@@ -134,7 +133,7 @@ OmniHandO10Rs485BridgeNode::OmniHandO10Rs485BridgeNode()
 
   if (enable_left_ && !enable_vr_trigger_control_) {
     left_sub_ = create_subscription<sensor_msgs::msg::JointState>(
-        "/io_teleop/joint_cmd_finger_left", cmd_qos,
+        "/action/left_hand/joint_states", cmd_qos,
         [this](const sensor_msgs::msg::JointState::SharedPtr msg) {
           if (msg->name.size() != msg->position.size()) {
             return;

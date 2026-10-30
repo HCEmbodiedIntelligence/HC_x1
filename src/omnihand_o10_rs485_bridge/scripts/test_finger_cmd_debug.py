@@ -106,12 +106,12 @@ class FingerCmdDebugNode(Node):
                          history=HistoryPolicy.KEEP_LAST)
         self._last_r: List[int] | None = None
         self._last_l: List[int] | None = None
-        self.create_subscription(JointState, "/io_teleop/joint_cmd_finger_right", qos,
+        self.create_subscription(JointState, "/action/right_hand/joint_states", qos,
                                  lambda m: self._on_msg("右", RIGHT_RANGE, m, "r"))
-        self.create_subscription(JointState, "/io_teleop/joint_cmd_finger_left", qos,
+        self.create_subscription(JointState, "/action/left_hand/joint_states", qos,
                                  lambda m: self._on_msg("左", LEFT_RANGE, m, "l"))
         self.get_logger().info(
-            "监听 /io_teleop/joint_cmd_finger_left|right; init 张开 motor=%s", K_OPEN_MOTOR[:3]
+            "监听 /action/{left,right}_hand/joint_states; init 张开 motor=%s", K_OPEN_MOTOR[:3]
         )
 
     def _on_msg(self, side: str, rng, msg: JointState, key: str) -> None:
@@ -137,8 +137,8 @@ class FingerCmdDebugNode(Node):
 def publish_test(node: Node, mode: str) -> None:
     qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT,
                      history=HistoryPolicy.KEEP_LAST)
-    pub_r = node.create_publisher(JointState, "/io_teleop/joint_cmd_finger_right", qos)
-    pub_l = node.create_publisher(JointState, "/io_teleop/joint_cmd_finger_left", qos)
+    pub_r = node.create_publisher(JointState, "/action/right_hand/joint_states", qos)
+    pub_l = node.create_publisher(JointState, "/action/left_hand/joint_states", qos)
 
     if mode == "zero":
         r_pos = [0.0] * len(RIGHT_JOINTS_16)

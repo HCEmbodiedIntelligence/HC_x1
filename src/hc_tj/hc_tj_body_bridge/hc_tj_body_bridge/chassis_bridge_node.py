@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge io_teleop base/VR input to Redis and publish record-only telemetry."""
+"""Bridge the standard base command to Redis and publish base status."""
 
 import json
 import threading
@@ -7,8 +7,6 @@ import time
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from io_msgs2.msg import VrData
 from std_msgs.msg import Float64MultiArray, String
 
 import redis
@@ -24,7 +22,8 @@ class ChassisBridgeNode(Node):
         self.declare_parameter("redis_port", 6379)
         self.declare_parameter("redis_key_command", "taskGroupCmd")
         self.declare_parameter("redis_key_state", "agvState")
-        self.declare_parameter("chassis_state_topic", "/io_teleop/chassis_state")
+        self.declare_parameter("chassis_state_topic", "/status/base")
+        self.declare_parameter("base_command_topic", "/action/base/command")
         self.declare_parameter("state_poll_interval_sec", 0.1)
         self.declare_parameter("command_interval_sec", 0.08)
         self.declare_parameter("command_timeout_sec", 0.25)
@@ -34,12 +33,6 @@ class ChassisBridgeNode(Node):
         self.declare_parameter("linear_gain", 1.0)
         self.declare_parameter("angular_gain", 1.0)
         self.declare_parameter("lateral_gain", 1.0)
-        self.declare_parameter("vr_data_topic", "/io_teleop/vr_data")
-        self.declare_parameter("stick_deadzone", 0.05)
-        self.declare_parameter("lateral_stick_invert", False)
-        self.declare_parameter(
-            "lateral_command_topic", "/io_teleop/target_base_lateral_move"
-        )
         self.declare_parameter("stop_repeat_count", 8)
         self.declare_parameter("enable_control", True)
 
@@ -55,6 +48,9 @@ class ChassisBridgeNode(Node):
             self.get_parameter("chassis_state_topic")
             .get_parameter_value()
             .string_value
+        )
+        self.base_command_topic = (
+            self.get_parameter("base_command_topic").get_parameter_value().string_value
         )
         self.state_poll_interval_sec = (
             self.get_parameter("state_poll_interval_sec")
@@ -83,22 +79,6 @@ class ChassisBridgeNode(Node):
         self.lateral_gain = (
             self.get_parameter("lateral_gain").get_parameter_value().double_value
         )
-        self.vr_data_topic = (
-            self.get_parameter("vr_data_topic").get_parameter_value().string_value
-        )
-        self.stick_deadzone = (
-            self.get_parameter("stick_deadzone").get_parameter_value().double_value
-        )
-        self.lateral_stick_invert = (
-            self.get_parameter("lateral_stick_invert")
-            .get_parameter_value()
-            .bool_value
-        )
-        self.lateral_command_topic = (
-            self.get_parameter("lateral_command_topic")
-            .get_parameter_value()
-            .string_value
-        )
         self.stop_repeat_count = (
             self.get_parameter("stop_repeat_count").get_parameter_value().integer_value
         )
@@ -125,9 +105,8 @@ class ChassisBridgeNode(Node):
 
         self.latest_delta_yaw = 0.0
         self.latest_delta_pos = 0.0
-        self.latest_lateral_stick = 0.0
+        self.latest_delta_lateral = 0.0
         self.last_base_move_time = 0.0
-        self.last_vr_data_time = 0.0
         self.task_id = int(time.time() * 1000) % 2_000_000_000
         self.shutting_down = False
         self.state_stop_event = threading.Event()
@@ -136,41 +115,25 @@ class ChassisBridgeNode(Node):
         self.chassis_state_pub = self.create_publisher(
             String, self.chassis_state_topic, 10
         )
-        self.lateral_command_pub = self.create_publisher(
-            Float64MultiArray, self.lateral_command_topic, 10
-        )
-
         if self.control_enabled:
             self.base_move_sub = self.create_subscription(
                 Float64MultiArray,
-                "/io_teleop/target_base_move",
+                self.base_command_topic,
                 self.target_base_move_callback,
                 10,
-            )
-            self.vr_data_sub = self.create_subscription(
-                VrData,
-                self.vr_data_topic,
-                self.vr_data_callback,
-                QoSProfile(
-                    reliability=ReliabilityPolicy.BEST_EFFORT,
-                    history=HistoryPolicy.KEEP_LAST,
-                    depth=10,
-                ),
             )
             self.command_timer = self.create_timer(
                 self.command_interval_sec, self.command_timer_callback
             )
             self.get_logger().info(
-                f"底盘控制开启：横移 <- {self.vr_data_topic} "
-                "(r_thumb_stick_axis_y)，前后/旋转 <- /io_teleop/target_base_move"
+                f"底盘控制开启：旋转/前后/横移 <- {self.base_command_topic}"
             )
         else:
             self.get_logger().info(
                 "底盘只读模式：仅读取 agvState，不订阅运动目标、不写 taskGroupCmd"
             )
         self.get_logger().info(
-            f"记录话题: 状态 -> {self.chassis_state_topic} (agvState JSON), "
-            f"横移命令 -> {self.lateral_command_topic} (vy m/s)"
+            f"状态话题: {self.chassis_state_topic} (agvState JSON)"
         )
 
         try:
@@ -215,18 +178,8 @@ class ChassisBridgeNode(Node):
             return
         self.latest_delta_yaw = float(msg.data[0])
         self.latest_delta_pos = float(msg.data[1])
-        if len(msg.data) >= 3:
-            self.latest_delta_lateral = float(msg.data[2])
+        self.latest_delta_lateral = float(msg.data[2]) if len(msg.data) >= 3 else 0.0
         self.last_base_move_time = time.monotonic()
-
-    def vr_data_callback(self, msg: VrData) -> None:
-        stick_y = float(msg.r_thumb_stick_axis_y)
-        if self.lateral_stick_invert:
-            stick_y = -stick_y
-        if abs(stick_y) < self.stick_deadzone:
-            stick_y = 0.0
-        self.latest_lateral_stick = stick_y
-        self.last_vr_data_time = time.monotonic()
 
     def clip(self, value: float, limit: float) -> float:
         return max(-limit, min(limit, value))
@@ -234,9 +187,7 @@ class ChassisBridgeNode(Node):
     def compute_velocity(self) -> tuple[float, float, float]:
         now = time.monotonic()
         base_active = now - self.last_base_move_time <= self.command_timeout_sec
-        vr_active = now - self.last_vr_data_time <= self.command_timeout_sec
-
-        if not base_active and not vr_active:
+        if not base_active:
             return 0.0, 0.0, 0.0
 
         vx = (
@@ -244,12 +195,7 @@ class ChassisBridgeNode(Node):
             if base_active
             else 0.0
         )
-        if base_active and hasattr(self, "latest_delta_lateral"):
-            vy = self.clip(self.latest_delta_lateral * self.lateral_gain, self.max_vy)
-        elif vr_active:
-            vy = self.clip(self.latest_lateral_stick * self.lateral_gain * self.max_vy, self.max_vy)
-        else:
-            vy = 0.0
+        vy = self.clip(self.latest_delta_lateral * self.lateral_gain, self.max_vy)
         vw = (
             self.clip(self.latest_delta_yaw * self.angular_gain, self.max_vw)
             if base_active
@@ -261,9 +207,6 @@ class ChassisBridgeNode(Node):
         if not self.control_enabled:
             return
         self.task_id += 1
-        # This topic is output-only telemetry for rosbag/data recording. Nothing
-        # in this bridge subscribes to it or uses it for chassis control.
-        self.lateral_command_pub.publish(Float64MultiArray(data=[vy]))
         command = {
             "taskStartTimeStamp": int(time.time() * 1000),
             "taskGroupCmd": 1,

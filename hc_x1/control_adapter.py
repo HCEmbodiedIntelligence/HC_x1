@@ -6,12 +6,11 @@ from __future__ import annotations
 import os
 
 import rclpy
-from geometry_msgs.msg import PoseArray
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool, Float64MultiArray, String
+from std_msgs.msg import Bool
 
 try:
     from rclpy._rclpy_pybind11 import RCLError
@@ -29,7 +28,7 @@ def latest_qos(reliability: ReliabilityPolicy) -> QoSProfile:
 
 
 class HcX1ControlAdapter(Node):
-    """Bridge control/state topics without sharing an executor with cameras."""
+    """Bridge the remaining private whole-body state without camera callbacks."""
 
     def __init__(self) -> None:
         super().__init__("hc_x1_control_adapter")
@@ -59,72 +58,8 @@ class HcX1ControlAdapter(Node):
             latest_best_effort,
         )
 
-        # Arm joint commands use the dedicated 100 Hz smoother and intentionally
-        # do not pass through this bridge.
-        self.base_move_pub = self.create_publisher(
-            Float64MultiArray, "/io_teleop/target_base_move", latest_reliable
-        )
-        self.create_subscription(
-            Float64MultiArray,
-            "/action/base/command",
-            self.base_move_pub.publish,
-            latest_best_effort,
-        )
-
-        self.finger_left_pub = self.create_publisher(
-            JointState,
-            "/io_teleop/joint_cmd_finger_left",
-            latest_best_effort,
-        )
-        self.create_subscription(
-            JointState,
-            "/action/left_hand/joint_states",
-            self.finger_left_pub.publish,
-            latest_best_effort,
-        )
-        self.finger_right_pub = self.create_publisher(
-            JointState,
-            "/io_teleop/joint_cmd_finger_right",
-            latest_best_effort,
-        )
-        self.create_subscription(
-            JointState,
-            "/action/right_hand/joint_states",
-            self.finger_right_pub.publish,
-            latest_best_effort,
-        )
-
-        self.hand_state_pub = self.create_publisher(
-            JointState, "/observation/hands/joint_states", latest_reliable
-        )
-        self.create_subscription(
-            JointState,
-            "/io_teleop/hand_joint_states",
-            self.hand_state_pub.publish,
-            latest_best_effort,
-        )
-        self.hand_trigger_pub = self.create_publisher(
-            PoseArray, "/observation/hands/triggers", latest_reliable
-        )
-        self.create_subscription(
-            PoseArray,
-            "/io_teleop/hand_trigger",
-            self.hand_trigger_pub.publish,
-            latest_best_effort,
-        )
-
-        self.chassis_state_pub = self.create_publisher(
-            String, "/status/base", latest_reliable
-        )
-        self.create_subscription(
-            String,
-            "/io_teleop/chassis_state",
-            self.chassis_state_pub.publish,
-            latest_best_effort,
-        )
-
         self.get_logger().info(
-            "HC X1 control adapter ready: latest-only joint, finger and base bridge"
+            "HC X1 state adapter ready: latest-only whole-body state bridge"
         )
 
 

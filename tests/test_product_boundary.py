@@ -65,6 +65,15 @@ class ProductBoundaryTests(unittest.TestCase):
         self.assertNotIn("CompressedImage", control)
         self.assertNotIn("/cameras/", control)
         self.assertNotIn("/vrdata", control)
+        for removed_topic in (
+            "/io_teleop/target_base_move",
+            "/io_teleop/joint_cmd_finger_left",
+            "/io_teleop/joint_cmd_finger_right",
+            "/io_teleop/hand_joint_states",
+            "/io_teleop/hand_trigger",
+            "/io_teleop/chassis_state",
+        ):
+            self.assertNotIn(removed_topic, control)
 
         self.assertIn("CompressedImage", camera)
         self.assertNotIn('"/io_teleop/joint_states"', camera)

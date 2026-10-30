@@ -7,7 +7,8 @@ chassis_bridge:
     redis_port: 6379
     redis_key_command: "taskGroupCmd"
     redis_key_state: "agvState"
-    chassis_state_topic: "/io_teleop/chassis_state"
+    chassis_state_topic: "/status/base"
+    base_command_topic: "/action/base/command"
     state_poll_interval_sec: 0.1
     command_interval_sec: 0.08
     command_timeout_sec: 0.25
@@ -17,8 +18,4 @@ chassis_bridge:
     linear_gain: 1.0
     angular_gain: 1.0
     lateral_gain: 1.0
-    vr_data_topic: "/io_teleop/vr_data"
-    stick_deadzone: 0.05
-    lateral_stick_invert: false
-    lateral_command_topic: "/io_teleop/target_base_lateral_move"
     stop_repeat_count: 8
