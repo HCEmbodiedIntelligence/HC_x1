@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | `/io_teleop/joint_states` | `/observation/joint_states` | `sensor_msgs/msg/JointState` |
 | OmniHand 驱动 | `/observation/hands/joint_states` | `sensor_msgs/msg/JointState` |
-| OmniHand 驱动 | `/observation/hands/triggers` | `geometry_msgs/msg/PoseArray` |
+| 中间件 VR 输入 | `/observation/hands/triggers` | `geometry_msgs/msg/PoseArray` |
 | 底盘 Redis 桥 | `/status/base` | `std_msgs/msg/String` |
 | `/io_teleop/camera_head/color[/compressed]` | `/observation/cameras/head/color/compressed` | `sensor_msgs/msg/CompressedImage` |
 | `/io_teleop/camera_head/depth` | `/observation/cameras/head/depth/compressed` | `sensor_msgs/msg/CompressedImage` |

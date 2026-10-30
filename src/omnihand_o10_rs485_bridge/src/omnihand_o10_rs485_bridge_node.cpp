@@ -98,9 +98,9 @@ OmniHandO10Rs485BridgeNode::OmniHandO10Rs485BridgeNode()
     left_.last_init_time = now();
   }
 
-  hand_trigger_pub_ = create_publisher<geometry_msgs::msg::PoseArray>(
-      hand_trigger_topic_, rclcpp::QoS(20));
   if (enable_vr_trigger_control_) {
+    hand_trigger_pub_ = create_publisher<geometry_msgs::msg::PoseArray>(
+        hand_trigger_topic_, rclcpp::QoS(20));
     rclcpp::SensorDataQoS vr_qos;
     vr_qos.keep_last(5);
     vr_data_sub_ = create_subscription<io_msgs2::msg::VrData>(

@@ -66,7 +66,7 @@ ros2 launch omnihand_o10_rs485_bridge omnihand_o10_rs485_bridge.launch.py \
 | 订阅 | `/control/vr/io_data` | 可选扳机模式：左右中指（握把）扳机分别控制左右手 |
 | 发布 | `/observation/hands/vibration_feedback` | 外骨骼震动反馈 `Float64MultiArray[10]`（0–4 右手五指，5–9 左手五指，范围 0–10） |
 | 发布 | `/observation/hands/joint_states` | `JointState`，实际反馈换算的 20 个主动关节角（右 10 + 左 10，rad） |
-| 发布 | `/observation/hands/triggers` | `PoseArray`，`poses[0]=左`、`poses[1]=右`；`position.x=模拟量`、`position.y=数字状态` |
+| 发布 | `/observation/hands/triggers` | 仅扳机直控模式；`PoseArray`，`poses[0]=左`、`poses[1]=右` |
 
 外骨骼关节 rad 经映射表线性插值到电机位置 0–4096（对齐 `main_rs485_ros2.cc`），**100 Hz（10ms）** 周期下发 `SetAllJointMotorPosi`。触觉通过 `GetTactileSensorData` 读取，默认 **10 Hz** 发布到 `/observation/hands/vibration_feedback`（**BEST_EFFORT**）。
 
