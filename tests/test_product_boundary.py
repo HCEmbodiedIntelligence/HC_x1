@@ -45,9 +45,9 @@ class ProductBoundaryTests(unittest.TestCase):
             (self.root / "config/x1_hardware.yaml").read_text(encoding="utf-8")
         )["control"]["command_smoothing"]
         self.assertEqual(config["input_topic"], "/action/joint_states")
-        self.assertEqual(config["output_topic"], "/io_teleop/joint_cmd")
+        self.assertEqual(config["output_topic"], "/control/joint_cmd")
         self.assertEqual(config["rate_hz"], 100.0)
-        self.assertEqual(config["time_constant"], 0.04)
+        self.assertEqual(config["time_constant"], 0.03)
         self.assertEqual(config["max_acceleration"], 12.0)
 
     def test_control_and_camera_adapters_are_process_isolated(self):

@@ -2,19 +2,25 @@ control:
   command_smoothing:
     node_name: hc_x1_joint_command_smoother
     input_topic: /action/joint_states
-    feedback_topic: /io_teleop/joint_states
-    output_topic: /io_teleop/joint_cmd
-    hardware_ready_topic: /io_teleop/hardware_ready
+    feedback_topic: /observation/joint_states
+    output_topic: /control/joint_cmd
+    hardware_ready_topic: /status/hardware/ready
     rate_hz: 100.0
-    time_constant: 0.04
+    time_constant: 0.03
     max_velocity: 2.5
     max_acceleration: 12.0
-    deadband: 0.00015
+    deadband: 0.0008
     input_timeout: 0.15
+    input_stop_timeout: 0.35
+    emergency_stop_topic: /control/emergency_stop
     feedback_timeout: 0.5
     feedback_resync_threshold: 0.5
     publisher_conflict_check_period: 0.5
     allowed_idle_output_publishers:
       - robot_control_pid_node
-    conflict_activity_topic: /io_teleop/sol_q
+    conflict_activity_topic: ""
     conflict_activity_timeout: 0.25
+    joint_groups:
+      left_arm: [Joint1_L, Joint2_L, Joint3_L, Joint4_L, Joint5_L, Joint6_L, Joint7_L]
+      right_arm: [Joint1_R, Joint2_R, Joint3_R, Joint4_R, Joint5_R, Joint6_R, Joint7_R]
+      waist: [leg_1, leg_2, zhi]

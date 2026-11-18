@@ -27,7 +27,12 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 
-from hc_x1.command_smoothing import JointTrajectorySmoother, SmoothingLimits
+from hc_x1.command_smoothing import (
+    JointTrajectorySmoother,
+    SmoothingLimits,
+    command_stream_state,
+    disabled_joints_for_launch,
+)
 
 
 def load_smoothing_config(path: str) -> dict:
@@ -42,12 +47,27 @@ def load_smoothing_config(path: str) -> dict:
 
 
 class JointCommandSmootherNode(Node):
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, launch_args: list[str] | None = None):
         config = load_smoothing_config(config_path)
         super().__init__(str(config.get("node_name", "hc_x1_joint_command_smoother")))
 
+        joint_groups = config.get("joint_groups", {})
+        if not isinstance(joint_groups, dict):
+            raise ValueError("command_smoothing.joint_groups must be an object")
+        for group, names in joint_groups.items():
+            if not isinstance(names, list) or not all(
+                isinstance(name, str) and name for name in names
+            ):
+                raise ValueError(
+                    f"command_smoothing.joint_groups.{group} must be a string list"
+                )
+        self.disabled_joint_names = disabled_joints_for_launch(
+            launch_args or [], joint_groups
+        )
+
         self.rate_hz = float(config.get("rate_hz", 100.0))
         self.input_timeout = float(config.get("input_timeout", 0.15))
+        self.input_stop_timeout = float(config.get("input_stop_timeout", 0.35))
         self.feedback_timeout = float(config.get("feedback_timeout", 0.5))
         self.feedback_resync_threshold = float(
             config.get("feedback_resync_threshold", 0.5)
@@ -62,6 +82,7 @@ class JointCommandSmootherNode(Node):
             raise ValueError("command_smoothing.rate_hz must be positive")
         for key, value in (
             ("input_timeout", self.input_timeout),
+            ("input_stop_timeout", self.input_stop_timeout),
             ("feedback_timeout", self.feedback_timeout),
             ("feedback_resync_threshold", self.feedback_resync_threshold),
             (
@@ -72,6 +93,10 @@ class JointCommandSmootherNode(Node):
         ):
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"command_smoothing.{key} must be positive")
+        if self.input_stop_timeout <= self.input_timeout:
+            raise ValueError(
+                "command_smoothing.input_stop_timeout must be greater than input_timeout"
+            )
 
         self.smoother = JointTrajectorySmoother(
             SmoothingLimits(
@@ -83,14 +108,17 @@ class JointCommandSmootherNode(Node):
         )
         self.input_topic = str(config.get("input_topic", "/action/joint_states"))
         self.feedback_topic = str(
-            config.get("feedback_topic", "/io_teleop/joint_states")
+            config.get("feedback_topic", "/observation/joint_states")
         )
-        self.output_topic = str(config.get("output_topic", "/io_teleop/joint_cmd"))
+        self.output_topic = str(config.get("output_topic", "/control/joint_cmd"))
         self.conflict_activity_topic = str(
-            config.get("conflict_activity_topic", "/io_teleop/sol_q")
+            config.get("conflict_activity_topic", "")
         )
         self.hardware_ready_topic = str(
-            config.get("hardware_ready_topic", "/io_teleop/hardware_ready")
+            config.get("hardware_ready_topic", "/status/hardware/ready")
+        )
+        self.emergency_stop_topic = str(
+            config.get("emergency_stop_topic", "/control/emergency_stop")
         )
         allowed_publishers = config.get(
             "allowed_idle_output_publishers", ["robot_control_pid_node"]
@@ -108,11 +136,13 @@ class JointCommandSmootherNode(Node):
             ("input_topic", self.input_topic),
             ("feedback_topic", self.feedback_topic),
             ("output_topic", self.output_topic),
-            ("conflict_activity_topic", self.conflict_activity_topic),
             ("hardware_ready_topic", self.hardware_ready_topic),
+            ("emergency_stop_topic", self.emergency_stop_topic),
         ):
             if not topic.startswith("/"):
                 raise ValueError(f"command_smoothing.{key} must start with /")
+        if self.conflict_activity_topic and not self.conflict_activity_topic.startswith("/"):
+            raise ValueError("command_smoothing.conflict_activity_topic must start with /")
 
         reliable_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -131,16 +161,23 @@ class JointCommandSmootherNode(Node):
             self._feedback_callback,
             qos_profile_sensor_data,
         )
-        self.create_subscription(
-            JointState,
-            self.conflict_activity_topic,
-            self._conflict_activity_callback,
-            qos_profile_sensor_data,
-        )
+        if self.conflict_activity_topic:
+            self.create_subscription(
+                JointState,
+                self.conflict_activity_topic,
+                self._conflict_activity_callback,
+                qos_profile_sensor_data,
+            )
         self.create_subscription(
             Bool,
             self.hardware_ready_topic,
             self._hardware_ready_callback,
+            reliable_qos,
+        )
+        self.create_subscription(
+            Bool,
+            self.emergency_stop_topic,
+            self._emergency_stop_callback,
             reliable_qos,
         )
 
@@ -157,6 +194,8 @@ class JointCommandSmootherNode(Node):
         self.output_conflicts: tuple[str, ...] = ()
         self.active = False
         self.timed_out = False
+        self.holding_gap = False
+        self.last_feedback_lag_log_time = 0.0
         self.timer = self.create_timer(1.0 / self.rate_hz, self._tick)
         limits = self.smoother.limits
         self.get_logger().info(
@@ -165,6 +204,18 @@ class JointCommandSmootherNode(Node):
             f"tau={limits.time_constant:.3f}s, velocity={limits.max_velocity:.2f} rad/s, "
             f"acceleration={limits.max_acceleration:.2f} rad/s^2"
         )
+        if self.disabled_joint_names:
+            self.get_logger().info(
+                "read-only joints filtered from smoother targets: "
+                + ", ".join(sorted(self.disabled_joint_names))
+            )
+
+    def _controlled_feedback(self, feedback: dict[str, float]) -> dict[str, float]:
+        return {
+            name: position
+            for name, position in feedback.items()
+            if name not in self.disabled_joint_names
+        }
 
     def _hardware_ready_callback(self, message: Bool) -> None:
         ready = bool(message.data)
@@ -192,6 +243,8 @@ class JointCommandSmootherNode(Node):
             self.smoother.clear()
             feedback = self._fresh_feedback(time.monotonic())
             if feedback:
+                feedback = self._controlled_feedback(feedback)
+            if feedback:
                 names = list(feedback.keys())
                 positions = [float(feedback[name]) for name in names]
                 self.smoother.reset(names, positions, feedback=feedback)
@@ -203,6 +256,18 @@ class JointCommandSmootherNode(Node):
                     "hardware ready confirmed: smoother cleared old targets; awaiting fresh feedback/targets"
                 )
 
+    def _emergency_stop_callback(self, message: Bool) -> None:
+        if not message.data:
+            return
+        self.active = False
+        self.smoother.clear()
+        self.target_names = []
+        self.target_positions = []
+        self.last_target_time = 0.0
+        self.holding_gap = False
+        self.timed_out = True
+        self.get_logger().warning("emergency stop: smoother output and targets cleared immediately")
+
     def _target_callback(self, message: JointState) -> None:
         if not self.hardware_ready:
             # 1. HC_X1 回零期间丢弃全部目标指令。
@@ -212,11 +277,21 @@ class JointCommandSmootherNode(Node):
         if len(set(message.name)) != len(message.name):
             return
         positions = [float(value) for value in message.position]
-        if not all(math.isfinite(value) for value in positions):
+        if any(math.isinf(value) for value in positions):
             return
-        self.target_names = list(message.name)
-        self.target_positions = positions
+        # NaN is an absent action; virtual grippers are not arm motors.
+        indices = [i for i, name in enumerate(message.name)
+                   if math.isfinite(positions[i])
+                   and name not in ('R_ban', 'L_ban')
+                   and name not in self.disabled_joint_names]
+        self.target_names = [message.name[i] for i in indices]
+        self.target_positions = [positions[i] for i in indices]
+        if not indices:
+            return
         self.last_target_time = time.monotonic()
+        if self.holding_gap:
+            self.get_logger().info("joint command stream resumed after a short scheduling gap")
+        self.holding_gap = False
 
     def _feedback_callback(self, message: JointState) -> None:
         if len(message.name) != len(message.position):
@@ -227,9 +302,11 @@ class JointCommandSmootherNode(Node):
         self.feedback = values
         self.last_feedback_time = time.monotonic()
         if self.hardware_ready and not self.smoother.positions and self.feedback:
-            names = list(self.feedback.keys())
-            positions = [float(self.feedback[name]) for name in names]
-            self.smoother.reset(names, positions, feedback=self.feedback)
+            feedback = self._controlled_feedback(self.feedback)
+            names = list(feedback.keys())
+            positions = [float(feedback[name]) for name in names]
+            if names:
+                self.smoother.reset(names, positions, feedback=feedback)
 
     def _conflict_activity_callback(self, _message: JointState) -> None:
         self.last_conflict_activity_time = time.monotonic()
@@ -238,12 +315,6 @@ class JointCommandSmootherNode(Node):
         if now - self.last_feedback_time <= self.feedback_timeout:
             return self.feedback
         return {}
-
-    def _needs_feedback_resync(self, feedback: dict[str, float]) -> bool:
-        for name, position in self.smoother.positions.items():
-            if name in feedback and abs(feedback[name] - position) > self.feedback_resync_threshold:
-                return True
-        return False
 
     def _foreign_output_publishers(self) -> list[str]:
         publishers = self.get_publishers_info_by_topic(self.output_topic)
@@ -302,22 +373,33 @@ class JointCommandSmootherNode(Node):
         if not self._output_is_exclusive(now):
             return
 
-        if (
-            not self.target_names
-            or now - self.last_target_time > self.input_timeout
-        ):
+        if not self.target_names:
+            return
+
+        stream_state = command_stream_state(
+            now - self.last_target_time,
+            self.input_timeout,
+            self.input_stop_timeout,
+        )
+        if stream_state == "stop":
             if self.active:
                 self.active = False
                 self.smoother.clear()
                 if not self.timed_out:
                     self.get_logger().warning(
-                        "joint command input timed out; stopped publishing for driver watchdog hold"
+                        "joint command input stop timeout; stopped publishing for driver watchdog hold"
                     )
                     self.timed_out = True
+            self.holding_gap = False
             return
+        if stream_state == "hold" and not self.holding_gap:
+            self.holding_gap = True
+            self.get_logger().warning(
+                "short joint command gap; continuously holding the latest target"
+            )
 
-        feedback = self._fresh_feedback(now)
-        if not self.active or self._needs_feedback_resync(feedback):
+        feedback = self._controlled_feedback(self._fresh_feedback(now))
+        if not self.active:
             self.smoother.reset(
                 self.target_names, self.target_positions, feedback=feedback
             )
@@ -325,6 +407,18 @@ class JointCommandSmootherNode(Node):
             if self.timed_out:
                 self.get_logger().info("joint command stream resumed from feedback")
             self.timed_out = False
+        else:
+            divergent = self.smoother.divergent_joints(
+                self.target_names,
+                feedback,
+                self.feedback_resync_threshold,
+            )
+            if divergent and now - self.last_feedback_lag_log_time >= 1.0:
+                self.last_feedback_lag_log_time = now
+                self.get_logger().warning(
+                    "feedback tracking lag detected; active trajectory kept continuous: "
+                    + ", ".join(divergent)
+                )
 
         positions, _velocities = self.smoother.step(
             self.target_names,
@@ -346,12 +440,13 @@ def default_config() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fixed-rate HC joint command smoother")
     parser.add_argument("--config", default=default_config())
+    parser.add_argument("--launch-arg", action="append", default=[])
     arguments = parser.parse_args()
     domain_id = int(os.environ.get("ROS_DOMAIN_ID", 14))
     rclpy.init(args=[], domain_id=domain_id)
     node = None
     try:
-        node = JointCommandSmootherNode(arguments.config)
+        node = JointCommandSmootherNode(arguments.config, arguments.launch_arg)
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException, RCLError):
         pass

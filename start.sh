@@ -45,7 +45,7 @@ if pgrep -f "hc_tj_marvin_bridge_node|run_hc_tj_all.sh" >/dev/null 2>&1; then
 fi
 
 mkdir -p "${LOG_DIR}"
-export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-14}"
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-13}"
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
 export PYTHONUNBUFFERED=1
 export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
@@ -110,9 +110,19 @@ if [[ " ${DRIVER_ARGS[*],,} " != *" --no-camera "* ]] &&
 fi
 
 log "启动 X1 100 Hz 关节命令平滑节点..."
-setsid /usr/bin/python3 -u "${PROJECT_ROOT}/hc_x1/joint_command_smoother.py" \
-  --config "${PROJECT_ROOT}/config/x1_hardware.yaml" \
-  >"${LOG_DIR}/joint_smoother.log" 2>&1 &
+# Keep the fixed-rate smoother off the EtherCAT core; deployment can override
+# the isolated CPU or set HC_X1_SMOOTHER_CPU=off on another host.
+SMOOTHER_CPU="${HC_X1_SMOOTHER_CPU:-3}"
+SMOOTHER_COMMAND=(/usr/bin/python3 -u
+  "${PROJECT_ROOT}/hc_x1/joint_command_smoother.py"
+  --config "${PROJECT_ROOT}/config/x1_hardware.yaml")
+for arg in "${DRIVER_ARGS[@]}"; do
+  SMOOTHER_COMMAND+=("--launch-arg=${arg}")
+done
+if [[ "${SMOOTHER_CPU}" != off && -n "${SMOOTHER_CPU}" ]]; then
+  SMOOTHER_COMMAND=(taskset -c "${SMOOTHER_CPU}" "${SMOOTHER_COMMAND[@]}")
+fi
+setsid "${SMOOTHER_COMMAND[@]}" >"${LOG_DIR}/joint_smoother.log" 2>&1 &
 PIDS+=("$!")
 
 CHECK_ARGS=(--log "${LOG_DIR}/drivers/upper_body.log"

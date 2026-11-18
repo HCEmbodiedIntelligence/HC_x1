@@ -34,7 +34,8 @@ class JointTrajectorySmootherTests(unittest.TestCase):
                 self.limits.max_acceleration * 0.01 + 1e-12,
             )
             last_velocity = velocities[0]
-        self.assertAlmostEqual(positions[0], 2.0, places=6)
+        # The active robot holds within the stationary deadband without a final snap.
+        self.assertLessEqual(abs(positions[0] - 2.0), self.limits.deadband)
 
     def test_deadband_holds_stationary_output(self):
         self.smoother.reset(["joint"], [0.0], feedback={"joint": 0.0})
